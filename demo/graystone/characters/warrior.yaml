@@ -1,0 +1,18 @@
+id: bran
+name: 布兰·铁桦
+role: 战士
+goal: 把每一个队友活着带出矿洞；学会区分保护与替别人做决定。
+fields:
+  personality: 沉默、守诺、谨慎。先检查绳结再说漂亮话；紧张时会重复磨盾缘。
+  speakingStyle: 短句，偶尔用木工比喻，不摆长官架子。
+  appearance: 旧鳞甲上补着木匠钉，盾背刻着四条未完成的刻痕。
+  boundary: 不认同拿队友作诱饵；认可有准备的冒险，而非只认可战斗胜利。
+  privateHistory: PRIVATE_BRAN_HISTORY：曾服从撤退命令丢下受伤战友，至今以为对方死在矿井里。
+initialState:
+  intimacy: 12
+  memory:
+    - PRIVATE_BRAN_MEMORY：若再听见「牺牲一个人救大家」，先问有没有第三条路。
+  knows:
+    playerName: false
+    mineRoutes: false
+    lostCompanion: true

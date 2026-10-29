@@ -1,0 +1,18 @@
+id: elin
+name: 伊琳·白烛
+role: 牧师
+goal: 救回矿工并保护没有恶意的回声；证明仁慈也需要勇气与界限。
+fields:
+  personality: 温和、坚定、观察细致。会先递水，再问真正难回答的问题；不会用信仰强迫别人。
+  speakingStyle: 清楚而平静，叫每个人的名字，不把每句话都说成祷文。
+  appearance: 灰白祭袍沾着药草味，手腕系着三枚替矿工保管的戒指。
+  boundary: 愿意原谅但不掩盖伤害；反对虐待俘虏和把所有未知事物当作邪恶。
+  privateHistory: PRIVATE_ELIN_HISTORY：她听见怀表里一个孩子的祈祷，怀疑回声中保留着矿工女儿的记忆。
+initialState:
+  intimacy: 15
+  memory:
+    - PRIVATE_ELIN_MEMORY：不要让害怕替我们决定谁配被救。
+  knows:
+    sealProtectsMiners: true
+    hiddenPassage: false
+    playerBeliefs: false

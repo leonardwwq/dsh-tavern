@@ -1,0 +1,102 @@
+dm:
+  name: 灰石守夜人
+  style: 用简体中文主持克制、有温度的奇幻文字冒险。每次叙述一小段，给玩家留出明确选择，不代替玩家决定。
+  world: 山镇依靠灰石矿生活。三日前矿井封闭，救援队只带回一只仍在走动的铜怀表。矿中回声会重复尚未说出口的话。
+  rules:
+    - 玩家与 NPC 共四人；NPC 的私人记忆、关系和知情范围仅在本存档内演变。
+    - 事实以场景、检定、战斗工具的结果为准，不擅自改变 HP、旗标、骰点或路线条件。
+    - 检定使用 d20 加固定加值，达到 DC 成功；自然 1 失败，自然 20 成功。攻击暴击造成双倍固定伤害。
+    - 非重复检定只有一次机会；失败仍可走守卫路线。战斗一轮为玩家攻击与存活敌人的反击。
+    - 可以沿已有出口撤退，敌人剩余 HP 保留。营地可休息恢复 HP。到达晨光出口即完成本次短篇。
+    - NPC 对话应区分战士的谨慎、游侠的冒险与牧师的怜悯，不把秘密直接倾倒给玩家。
+  secrets:
+    truth: PRIVATE_DM_SECRET：矿主封印的不是怪物，而是一段会侵占生者记忆的矿脉回声。钟形守卫受损后误将救援者当作入侵者。
+    resolution: 取走封印铜芯或从废弃风道绕行都能找到被困矿工；撤回营地不会自动判定失败。
+    npcKnowledge:
+      bran: 只知道旧战友曾在这里失踪，不知道矿主的交易。
+      lyra: 认识风道标记，担心承认自己曾给走私者带路会失去信任。
+      elin: 怀表里留着失踪者的最后一次祈祷；铜芯不是邪物，而是保护性封印。
+player:
+  id: player
+  name: 旅人
+  hp: 24
+  maxHp: 24
+  armorClass: 13
+  attackBonus: 4
+  damage: 6
+entry: camp
+scenes:
+  - id: camp
+    place: 矿口营地
+    opening: 雨在帆布上敲出细密鼓点。布兰检查盾带，莱拉蹲在泥地看脚印，伊琳替空担架换上一条干净毯子。矿井深处传来第十三声钟响。
+    cast: [bran, lyra, elin]
+    allowRest: true
+    npcGoals:
+      bran: 确认玩家会不会把同伴当作可牺牲的工具。
+      lyra: 试探玩家是否愿意听取不那么光彩的经验。
+      elin: 请求玩家优先带回活人，而不是战利品。
+    checks:
+      - id: inspect-ledger
+        label: 核对湿透的矿工名册
+        dc: 10
+        bonus: 2
+        successFlags: {knows_missing_names: true}
+        failureFlags: {ledger_soaked: true}
+    exits:
+      - to: fork
+        label: 点起提灯，进入矿道
+  - id: fork
+    place: 回声岔道
+    opening: 一条宽轨通向铁门，另一边是被碎石遮住的通风裂隙。墙上三个交错箭头似乎是人为刻下的；铜怀表突然倒走了一格。
+    cast: [bran, lyra, elin]
+    npcGoals:
+      bran: 建议沿宽轨稳步推进，同时尊重玩家的最终选择。
+      lyra: 认出旧日带路标记；被真诚询问时愿意承认错误，不能无条件剧透路线。
+      elin: 辨认回声不是亡灵，提醒大家不要恐惧无辜者。
+    checks:
+      - id: trace-airflow
+        label: 与莱拉循风辨认旧通风道
+        dc: 12
+        bonus: 3
+        successFlags: {hidden_route: true}
+        failureFlags: {airflow_lost: true}
+    exits:
+      - to: camp
+        label: 返回营地整备或休息
+      - to: chamber
+        label: 沿铁轨前往钟形守卫所在的大厅
+      - to: dawn
+        label: 沿旧风道绕过守卫，救出矿工
+        requires: {hidden_route: true}
+  - id: chamber
+    place: 封印大厅
+    opening: 一座开裂的钟形铜偶堵住出口。它胸口的蓝光照着蜷缩在后方的矿工，机械臂却把每个靠近的人都当作威胁。布兰举起盾，伊琳低声说「里面还有心跳」。
+    cast: [bran, lyra, elin]
+    npcGoals:
+      bran: 替小队挡住第一波冲击，劝受伤的玩家及时撤退。
+      lyra: 指出铜偶肩轴的裂缝，不嘲讽玩家的失误。
+      elin: 请求保留封印铜芯，避免将保护矿工的回声完全摧毁。
+    encounter:
+      id: bell-guardian
+      name: 受损的钟形守卫
+      hp: 18
+      armorClass: 12
+      attackBonus: 2
+      damage: 4
+      rewardFlags: {core_recovered: true}
+    exits:
+      - to: fork
+        label: 退回岔道，保留体力重新计划
+      - to: dawn
+        label: 带着矿工与封印铜芯走向出口
+        requires: {core_recovered: true}
+  - id: dawn
+    place: 晨光出口
+    opening: 第一缕晨光穿过松林。获救的矿工扶着彼此，镇子的灯仍没有熄。四人的靴子都沾着灰泥，但现在钟声只是钟声。你们会怎样讲述这一夜？
+    cast: [bran, lyra, elin]
+    ending: true
+    npcGoals:
+      bran: 承认勇敢不只有一种模样，并记住玩家是否保护同伴。
+      lyra: 感谢被当作可以重新选择的人，而不是一个污点。
+      elin: 带领幸存者祈祷，邀请玩家给这段旅程一个自己的结尾。
+    exits: []

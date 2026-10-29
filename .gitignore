@@ -1,0 +1,15 @@
+node_modules/
+.npm-cache/
+.install-stage-*/
+.profile-backup-*/
+.test-*/
+dist/
+WORKLOG.md
+.DS_Store
+.env
+.env.*
+!.env.example
+.npmrc
+*.tgz
+*.log
+coverage/

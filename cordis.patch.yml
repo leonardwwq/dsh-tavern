@@ -1,0 +1,11 @@
+# A dependency makes cultivation resolvable; it does not activate its bundle.
+# Prefer another standard cultivation row in this same composed entry group.
+# Inspect the final configuration, not ctx.get('cultivation'): service availability
+# during parallel startup is racy. Never reuse persona-studio's id here.
+- insert:
+    - id: tavern-cultivation
+      name: dsh-cultivation
+      disabled: !!js >-
+        ctx[Symbol.for('cordis.entry')].parent.data.some(e => e.id !== 'tavern-cultivation' && e.name === 'dsh-cultivation' && e.disabled !== true)
+    - id: tavern
+      name: dsh-tavern-adventure

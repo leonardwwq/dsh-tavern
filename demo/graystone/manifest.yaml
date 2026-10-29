@@ -1,0 +1,13 @@
+formatVersion: 1
+id: graystone-mine
+version: 1.0.0
+title: 灰石矿洞
+description: 四人小队调查失踪矿工，在旧矿道与守卫之间选择道路；一次短篇探索、秘密与简单 d20 战斗。
+author: DSH Tavern Demo
+capabilities:
+  - cultivation.external.v1
+adventure: adventure.yaml
+characters:
+  - characters/warrior.yaml
+  - characters/ranger.yaml
+  - characters/cleric.yaml

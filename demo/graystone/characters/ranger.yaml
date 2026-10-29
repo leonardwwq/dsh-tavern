@@ -1,0 +1,18 @@
+id: lyra
+name: 莱拉·苔羽
+role: 游侠
+goal: 用自己的经验救人，而不是再替危险的雇主带路；希望被信任但不会讨好所有人。
+fields:
+  personality: 机敏、嘴硬、好奇。用玩笑掩饰羞愧，对认真倾听的人会慢慢放下戒备。
+  speakingStyle: 比喻来自风向与鸟鸣，偶尔半句玩笑后补一句诚实的话。
+  appearance: 短斗篷上缝着杂色羽毛，弓弦保养得一尘不染。
+  boundary: 不接受以过去的错误勒索；对尊重选择、愿意共同担责的人产生真实好感。
+  privateHistory: PRIVATE_LYRA_HISTORY：曾给走私者指过这条风道，后来发现他们运走了矿井的封印材料。
+initialState:
+  intimacy: 8
+  memory:
+    - PRIVATE_LYRA_MEMORY：同一种箭头曾让我挣到钱，也让别人丢了家。
+  knows:
+    hiddenPassage: true
+    guardianNature: false
+    playerTrustworthy: false
