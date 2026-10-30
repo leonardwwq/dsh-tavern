@@ -4,7 +4,7 @@
 
 一个剧本、一位 DM、你和三名独立 NPC：用自然语言探索地下城、做出选择，让关系、记忆与规则后果留在同一份存档里。
 
-[快速开始](#快速开始) · [示例剧本](<demo/README.md>) · [剧本格式](<docs/adventure-format.md>) · [NPC 自主性](<docs/npc-autonomy.md>) · [开发与恢复](<docs/development-and-recovery.md>)
+[快速开始](#快速开始) · [更新日志](#更新日志) · [示例剧本](<demo/README.md>) · [剧本格式](<docs/adventure-format.md>) · [NPC 自主性](<docs/npc-autonomy.md>) · [开发与恢复](<docs/development-and-recovery.md>)
 
 ## 有什么不同
 
@@ -26,7 +26,7 @@
 npx @deepseek-ai/dsh plugin --profile web add --workspace-root dsh-tavern-adventure
 ```
 
-GitHub 项目名为 **dsh-tavern**，npm 包名为 **`dsh-tavern-adventure`**。如果曾装过旧名 `dsh-tavern` 的本地 bundle，升级前先备份并停用旧 bundle，勿同时加载两份；[迁移说明](<docs/development-and-recovery.md#审核归档后再发布>)。
+GitHub 项目名为 **dsh-tavern**，npm 包名为 **`dsh-tavern-adventure`**。从 0.2.0 或旧名 `dsh-tavern` 的本地 bundle 升级时：先安装 0.2.1，再从 profile 的 `package.json` 里移除旧的 `dsh-tavern` 依赖和对应的 `dsh.profile.bundles` 条目——两份同时加载会插入重复的 `tavern` / `tavern-cultivation` 行。旧存档用冻结快照继续，不会丢失。
 
 `web` 是目标 profile；如果你的原 DSH 使用其他 profile，请替换成实际名称。安装后，**重启原来启动 DSH 的那个进程，再刷新原 DSH Web 地址**。无需另起 Vite 或替代 Web 服务器；安装依赖不会让正在运行的进程自动获得新插件。
 
@@ -56,6 +56,18 @@ dsh plugin --profile <你的 profile> add dsh-cultivation@^0.4.1
 ```
 
 如果你希望 cultivation 出现在「设置 → 插件 → 已安装插件」里、能单独看版本与升级，再独立装一份即可（`dsh plugin --profile web add dsh-cultivation@^0.4.1`）。两份并存是安全的：tavern 的兜底项会关闭，且它只消费 `ctx.cultivation` 服务、不 import cultivation 的内部模块。详细验证见[开发文档](<docs/development-and-recovery.md>)。
+
+## 更新日志
+
+### 0.2.1（2026-10-30）
+
+- **cultivation 改为单向普通依赖。** 去掉 `bundleDependencies`，归档里不再内嵌 cultivation 副本；安装时由 profile 的 pnpm 从 registry 拉取，版本和来源都可见。归档从 179 KB 降到 109 KB，`tar tzf` 里没有 `node_modules/`。
+- **启动时硬校验。** `apiVersion` 必须为 1，挂载版本必须落在 `^0.4.1`（只比 major.minor.patch，`0.4.x` 预发布可用）；不匹配直接拒绝启动并打印升级命令。两份副本版本不一致时打一条 `warn`。服务版本来自 cultivation 0.4.2 新增的 `ctx.cultivation.version`；更旧的 0.4.1 回退到读依赖树里的 manifest。
+- **内置剧本只保留一个**：《这帮人脑子好像都有问题》。灰石矿洞移入 `tests/fixtures/` 作回归 fixture，不再随包发布；已有存档靠冻结快照继续。
+
+### 0.2.0（2026-10-29）
+
+首个公开发布：DM 会话、三名独立 NPC agent、剧本 ZIP 导入与存档接管；内置《灰石矿洞》，并把 cultivation 打进归档。
 
 ## 这一版能玩到哪里
 
