@@ -38,14 +38,18 @@ export async function checkPackage(base = root) {
   assert.match(pkg.version, /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/);
   assert.equal(pkg.type, 'module');
   assert.equal(pkg.main, 'lib/index.js');
-  assert.equal(pkg.dependencies?.['dsh-cultivation'], '^0.4.1');
+  const { CULTIVATION_RANGE, CULTIVATION_API_VERSION, satisfiesRange } = await import(pathToFileURL(resolve(base, 'lib/version.js')).href);
+  assert.equal(pkg.dependencies?.['dsh-cultivation'], CULTIVATION_RANGE, 'Declared dependency must equal the runtime compatibility range');
+  assert.equal(pkg.bundleDependencies ?? pkg.bundledDependencies, undefined, 'tavern must not vendor cultivation: install it as a dependency');
+  assert.equal(CULTIVATION_API_VERSION, 1);
+  assert(satisfiesRange('0.4.1', CULTIVATION_RANGE), 'The runtime range must admit the version tavern declares');
   assert.equal(pkg.dsh?.client?.platform, 'web');
   const patches = [pkg.dsh?.bundle?.patch].flat();
   assert(patches.length && patches.every(p => typeof p === 'string'), 'Bundle patch declaration required');
   assert(Array.isArray(pkg.files) && pkg.files.includes('lib') && pkg.files.includes('scripts'), 'Publish lib and scripts');
   assert((await readFile(resolve(base, 'lib/client.js'), 'utf8')).includes(`id: "${pkg.name}"`), 'Client module id must match the npm package name');
   assert(pkg.files.includes('docs'), 'Publish linked documentation');
-  for (const required of ['lib/index.js', 'lib/client.js', 'lib/core.js', 'README.md', 'LICENSE', 'scripts/build-demo.mjs', 'docs/adventure-format.md', 'docs/npc-autonomy.md', 'docs/development-and-recovery.md']) {
+  for (const required of ['lib/index.js', 'lib/client.js', 'lib/core.js', 'lib/version.js', 'README.md', 'LICENSE', 'scripts/build-demo.mjs', 'docs/adventure-format.md', 'docs/npc-autonomy.md', 'docs/development-and-recovery.md']) {
     await regularFile(base, required);
   }
   assert(pkg.exports && typeof pkg.exports === 'object', 'Explicit exports required');

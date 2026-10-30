@@ -1,6 +1,6 @@
 {
   "name": "dsh-tavern-adventure",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local script-driven dungeon adventures for DSH: DM sessions, independent NPC agents, and isolated saves.",
   "type": "module",
   "main": "lib/index.js",
@@ -10,13 +10,38 @@
     "./core": "./lib/core.js",
     "./package.json": "./package.json"
   },
-  "files": ["lib", "demo", "docs", "scripts", "cordis.patch.yml", "README.md", "LICENSE"],
+  "files": [
+    "lib",
+    "demo",
+    "docs",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
   "author": "leonardwwq",
-  "repository": { "type": "git", "url": "git+https://github.com/leonardwwq/dsh-tavern.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leonardwwq/dsh-tavern.git"
+  },
   "homepage": "https://github.com/leonardwwq/dsh-tavern#readme",
-  "bugs": { "url": "https://github.com/leonardwwq/dsh-tavern/issues" },
-  "keywords": ["deepseek-harness", "dsh", "tavern", "text-adventure", "npc", "roleplay", "文字冒险", "地下城"],
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+  "bugs": {
+    "url": "https://github.com/leonardwwq/dsh-tavern/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "tavern",
+    "text-adventure",
+    "npc",
+    "roleplay",
+    "文字冒险",
+    "地下城"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "test": "node --test",
     "check": "node scripts/check.mjs",
@@ -28,11 +53,16 @@
     "fflate": "^0.8.2",
     "yaml": "^2.8.1"
   },
-  "bundleDependencies": ["dsh-cultivation"],
-  "engines": {"node": ">=22"},
+  "engines": {
+    "node": ">=22"
+  },
   "dsh": {
-    "bundle": {"patch": "./cordis.patch.yml"},
-    "client": {"platform": "web"}
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
   },
   "license": "MIT"
 }

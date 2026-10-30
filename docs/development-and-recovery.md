@@ -4,9 +4,11 @@
 
 ## 环境与依赖装载
 
-需要 Node.js 22+、DSH Web、默认模型和 `spawn` 服务；以 DSH 0.2.1-rc.2 公开接口实现。tavern 声明 `dsh-cultivation: ^0.4.1`，所需角色能力最低版本为 0.4.1；cultivation 可以独立使用，不反向依赖 tavern。
+需要 Node.js 22+、DSH Web、默认模型和 `spawn` 服务；以 DSH 0.2.1-rc.2 公开接口实现。tavern 单向依赖 `dsh-cultivation: ^0.4.1`：装 tavern 时由 profile 的 pnpm 从 registry 一并安装，tavern 归档里**不含** cultivation 副本（0.2.0 及更早版本曾把它打进归档，0.2.1 起改为普通依赖）。cultivation 可以独立使用，不反向依赖 tavern。
 
-[装载配置](<../cordis.patch.yml>)提供 cultivation 兜底启动，因为 npm 依赖不等于插件启用。在同一标准装载组已配置 cultivation 时让位，避免重复启动；判定使用当前 DSH Loader 的 `!!js` 机制，已覆盖真实 Loader 和嵌套依赖解析测试。复杂嵌套装载组或表达式禁用行不在首期自动去重保证范围内。若宿主仍解析到旧服务，会明确报告依赖接口错误，不会迁移日常角色来掩盖问题。
+[装载配置](<../cordis.patch.yml>)提供 cultivation 兜底启动，因为 npm 依赖不等于插件启用。在同一标准装载组已配置 cultivation 时让位，避免重复启动；判定使用当前 DSH Loader 的 `!!js` 机制，已覆盖真实 Loader 和嵌套依赖解析测试。复杂嵌套装载组或表达式禁用行不在首期自动去重保证范围内。
+
+启动时 tavern 还会校验实际挂载的服务：`apiVersion` 必须为 1，服务版本必须落在 `^0.4.1`（只比较 major.minor.patch，`0.4.x` 的预发布号可用），否则拒绝启动并打印可复制执行的升级命令。服务自 cultivation 0.4.2 起在 `ctx.cultivation.version` 上报告自身版本；更旧的 0.4.1 没有该字段，tavern 退回读取自己依赖树里的 manifest。
 
 新增 bundle 后重启原 DSH 进程，刷新原 Web 地址。客户端是直接可加载模块，不需要替代 Web 服务；仅修改源码不代表自动热更新。
 
@@ -21,6 +23,8 @@ npm run check
 npm run build:demo
 ```
 
+默认运行时只导入一个示例剧本：[清单](<../demo/curtain-castle/manifest.yaml>)《这帮人脑子好像都有问题》，`build:demo` 生成[示例 ZIP](<../demo/curtain-castle.zip>)。旧的灰石矿洞已移到 [tests/fixtures/graystone](<../tests/fixtures/graystone/manifest.yaml>)，只作回归 fixture，不随包发布；已有存档仍使用冻结快照，无需迁移或删除数据。
+
 ### 使用本地 sibling cultivation
 
 需要开发尚未发布的 cultivation 修改时，可将两个仓库并列放置。以下本地安装方式可能产生开发符号链接，因此**不能直接从这个开发目录打包发布**：
@@ -33,31 +37,32 @@ npm run check
 # 只打印计划，零安装副作用
 node scripts/install-local.mjs
 
-# 在 staging 中安装真实 cultivation tarball，再生成最终包
+# 生成归档（只含 tavern 自身，cultivation 走 dependencies）
 node scripts/install-local.mjs --pack-only
 
 # 可选：显式选定 profile，打包并使用原生 CLI 安装；不另起服务
 node scripts/install-local.mjs --execute --profile web
 ```
 
-[本地打包器](<../scripts/install-local.mjs>)默认使用相邻 cultivation 仓库，也可通过 `--cultivation-dir /absolute/path/to/dsh-cultivation` 指定。它校验 cultivation 版本、构建示例，在本地 staging 打包 cultivation，将真实 tarball 安装到 staged tavern，再生成最终归档，不改正式依赖声明、源码依赖链接或锁文件。默认计划模式不改文件、profile 或正在运行的 GUI；安装必须显式 `--execute --profile NAME`。
+[本地打包器](<../scripts/install-local.mjs>)校验包元数据（包括「不得把 cultivation 打进归档」和「依赖范围等于运行时校验范围」）、构建示例，然后只打 tavern 一个包。它不改正式依赖声明、源码依赖链接或锁文件。默认计划模式不改文件、profile 或正在运行的 GUI；安装必须显式 `--execute --profile NAME`。
 
 ### 审核归档后再发布
 
-npm 会跳过被 bundle 的符号链接依赖。不要用开发目录直接执行 `npm publish`，也不要把在链接状态下直接 `npm pack` 的结果当作完整发布包。使用上述 helper 生成真实包含 cultivation 的归档，审核后只发布**审核过的同一个 tarball**：
+归档里不应该出现 `node_modules/`：cultivation 由 registry 提供，版本与来源才对用户可见。发布顺序固定为**先 cultivation、再 tavern**，否则 `^0.4.1` 依赖会解析到旧版本：
 
 ```sh
 node scripts/install-local.mjs --pack-only
-npm pack --dry-run --json ./dist/dsh-tavern-adventure-0.2.0.tgz
-npm publish ./dist/dsh-tavern-adventure-0.2.0.tgz --access public
+tar tzf ./dist/dsh-tavern-adventure-0.2.1.tgz | grep -c '^package/node_modules/' # 必须是 0
+npm publish --dry-run ./dist/dsh-tavern-adventure-0.2.1.tgz
+npm publish ./dist/dsh-tavern-adventure-0.2.1.tgz --access public
 ```
 
-归档审核应确认版本、文档、示例、许可与真实 bundled cultivation 都齐全，并执行发布方自己的验证流程。helper 本身不执行 npm 发布、Git 提交/推送或服务重启。上面的 publish 是维护者的显式发布步骤，不是普通玩家安装步骤。
+归档审核应确认版本、文档、示例、许可齐全，且 `package.json` 里没有 `bundleDependencies`、tar 内没有 `node_modules/`。helper 本身不执行 npm 发布、Git 提交/推送或服务重启。上面的 publish 是维护者的显式发布步骤，不是普通玩家安装步骤。
 
 审核包也可以交给 DSH 原生 CLI 安装：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add --workspace-root ./dist/dsh-tavern-adventure-0.2.0.tgz
+npx @deepseek-ai/dsh plugin --profile web add --workspace-root ./dist/dsh-tavern-adventure-0.2.1.tgz
 ```
 
 GitHub 项目名仍为 dsh-tavern，npm 发布名为 `dsh-tavern-adventure`。若曾安装本地旧名 `dsh-tavern` bundle，迁移前先备份，并在原 profile 中停用/移除旧 bundle 配置，避免新旧同时加载；不要删除存档目录。内部存储/API 标识继续兼容旧名，不因 npm 改名而清空存档。

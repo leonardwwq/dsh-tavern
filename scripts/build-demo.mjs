@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { zipSync } from 'fflate';
 import { parseArchive } from '../lib/store.js';
 
-const source = fileURLToPath(new URL('../demo/graystone/', import.meta.url));
-const destination = path.resolve(process.argv[2] ?? fileURLToPath(new URL('../demo/graystone.zip', import.meta.url)));
+const source = fileURLToPath(new URL('../demo/curtain-castle/', import.meta.url));
+const destination = path.resolve(process.argv[2] ?? fileURLToPath(new URL('../demo/curtain-castle.zip', import.meta.url)));
 const entries = {};
 async function walk(relative = '') {
   const children = await fs.readdir(path.join(source, relative), { withFileTypes: true });

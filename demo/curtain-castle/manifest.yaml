@@ -1,0 +1,12 @@
+formatVersion: 1
+id: curtain-castle
+version: 1.0.0
+title: 这帮人脑子好像都有问题
+description: 受雇完成一个神秘的委托，深夜的古堡，恶魔的低语，这其中似乎隐藏着什么秘密……
+author: DSH Tavern Demo
+capabilities: [cultivation.external.v1]
+adventure: adventure.yaml
+characters:
+  - characters/warrior.yaml
+  - characters/ranger.yaml
+  - characters/cleric.yaml

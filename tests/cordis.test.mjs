@@ -137,6 +137,8 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
     await game;
     assert.equal(game.state, 2);
     assert.equal(routes.size, 7);
+    // Retain the original mine as an explicit ABI/rule-test fixture only.
+    await globalThis[Symbol.for('dsh-tavern/stores.v1')].get(directory).store.importDirectory(join(root, 'tests/fixtures/graystone'));
     const dm = newAgent('cordis-dm');
     const ordinary = newAgent('cordis-ordinary');
     await emitCreated(dm); await emitCreated(ordinary);

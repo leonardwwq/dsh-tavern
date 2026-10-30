@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import plugin, { isBlankAgent } from '../lib/index.js';
 import { DM_TOOLS } from '../lib/runtime.js';
@@ -134,7 +135,11 @@ async function setup(t, { directory, ids = ['fresh', 'next'], autoApply = true }
       await route(req, res);
       return { status: res.statusCode, headers, body: res.body ? JSON.parse(res.body) : null, consumed };
     },
-    async start(sessionId = 'fresh') { return h.request('start', { body: { sessionId, scriptKey: KEY } }); }
+    // Legacy mine remains a rule-test fixture, not the automatically loaded demo.
+    async start(sessionId = 'fresh') {
+      await h.store().importDirectory(fileURLToPath(new URL('./fixtures/graystone/', import.meta.url)));
+      return h.request('start', { body: { sessionId, scriptKey: KEY } });
+    }
   };
   t.after(async () => { await h.dispose(); if (!directory) { assert.equal(path.dirname(dir), os.tmpdir()); assert.ok(path.basename(dir).startsWith('dsh-tavern-host-test-')); await rm(dir, { recursive: true, force: true }); } });
   if (autoApply) await h.apply();
@@ -157,11 +162,24 @@ test('boot registers exact routes, imports builtin, and exposes no global tools 
   assert.deepEqual([...h.routes.keys()].sort(), ['archive', 'attach', 'delete-script', 'import', 'pause', 'start', 'state'].map((name) => '/tavern/api/' + name).sort());
   const result = await h.request('state');
   assert.equal(result.status, 200); assert.equal(result.body.canStart, false);
-  assert.equal(result.body.scripts[0].key, KEY);
+  assert.deepEqual(result.body.scripts.map((script) => script.key), ['curtain-castle@1.0.0']);
+  assert.equal(result.body.scripts[0].title, '这帮人脑子好像都有问题');
   assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|npcGoals|reactions|privateHistory/);
   assert.equal(h.agent().definitions.size, 0);
   assert.equal(result.headers['cache-control'], 'no-store');
   assert.equal(plugin.inject.includes('sessionQuery'), true);
+});
+
+test('automatically imported curtain-castle starts without importing the legacy fixture', async (t) => {
+  const h = await setup(t);
+  const started = await h.request('start', { body: { sessionId: 'fresh', scriptKey: 'curtain-castle@1.0.0' } });
+  assert.equal(started.status, 200);
+  assert.equal(started.body.campaign.scriptKey, 'curtain-castle@1.0.0');
+  assert.equal(h.modes.get('fresh'), 'dm');
+  assert.equal(h.agent().followups.length, 1);
+  const state = await h.request('state', { sessionId: 'fresh' });
+  assert.deepEqual(state.body.scripts.map((script) => script.key), ['curtain-castle@1.0.0']);
+  assert.doesNotMatch(JSON.stringify(state.body), /PRIVATE_|npcGoals|privateHistory|initialState/);
 });
 
 test('HTTP boundary rejects untrusted origin, wrong method/media/JSON and oversized streaming bodies', async (t) => {
@@ -496,13 +514,15 @@ test('DM narration captures source-scene audience per committed message before l
 
 test('ZIP route accepts actual demo archive and archive/delete APIs enforce referenced-save safety', async (t) => {
   const h = await setup(t);
-  const zip = await readFile(new URL('../demo/graystone.zip', import.meta.url));
-  assert.equal((await h.request('import', { body: { name: 'graystone.zip', base64: zip.toString('base64') } })).status, 200);
+  const zip = await readFile(new URL('../demo/curtain-castle.zip', import.meta.url));
+  const imported = await h.request('import', { body: { name: 'curtain-castle.zip', base64: zip.toString('base64') } });
+  assert.equal(imported.status, 200);
+  assert.equal(imported.body.script.scriptKey, 'curtain-castle@1.0.0');
   await h.start();
   assert.equal((await h.request('archive', { body: { scriptKey: KEY, archived: true } })).status, 200);
   const blocked = await h.start('next'); assert.notEqual(blocked.status, 200);
   assert.notEqual((await h.request('delete-script', { body: { scriptKey: KEY } })).status, 200);
   const state = await h.request('state', { sessionId: 'fresh' });
-  assert.equal(state.body.scripts[0].archived, true); assert.equal(state.body.binding.readOnly, false);
+  assert.equal(state.body.scripts.find((script) => script.key === KEY).archived, true); assert.equal(state.body.binding.readOnly, false);
   assert.doesNotMatch(JSON.stringify(state.body), /PRIVATE_/);
 });

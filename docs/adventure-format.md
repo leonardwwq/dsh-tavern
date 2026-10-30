@@ -4,7 +4,7 @@
 
 ## 导入入口与 ZIP 结构
 
-在设置的「地城冒险」中管理剧本，也可以从新会话选择面板导入 ZIP。可导入示例：[灰石矿洞 ZIP](<../demo/graystone.zip>)；可编辑源文件：[剧本配置](<../demo/graystone/adventure.yaml>)、[包清单](<../demo/graystone/manifest.yaml>)。
+在设置的「地城冒险」中管理剧本，也可以从新会话选择面板导入 ZIP。可导入示例：[这帮人脑子好像都有问题 ZIP](<../demo/curtain-castle.zip>)；可编辑源文件：[剧本配置](<../demo/curtain-castle/adventure.yaml>)、[包清单](<../demo/curtain-castle/manifest.yaml>)。
 
 ZIP 根目录直接包含清单和内容，不要额外套外层文件夹：
 
@@ -49,7 +49,7 @@ characters:
 | 遭遇 | `id/name/hp/armorClass/attackBonus?/damage?/rewardFlags?` |
 | 休整与结束 | `allowRest: true` 允许休整恢复；`ending: true` 进入即完成 |
 
-完整字段与分支以[内置剧本](<../demo/graystone/adventure.yaml>)及其[角色内容](<../demo/graystone/characters/warrior.yaml>)为例。DM 背景/秘密、角色 `fields` 与 `initialState` 不出现在公共列表中。NPC 不替代骰点，DM 不能临时传入任意旗标。
+完整字段与分支以[内置剧本](<../demo/curtain-castle/adventure.yaml>)及其[角色内容](<../demo/curtain-castle/characters/warrior.yaml>)为例。DM 背景/秘密、角色 `fields` 与 `initialState` 不出现在公共列表中。NPC 不替代骰点，DM 不能临时传入任意旗标。
 
 首期只接受声明式数据和静态图片，**不执行**包内 JS、脚本、安装钩子或自定义宿主工具。剧本提示词不能扩大框架工具权限。安全校验约束文件和执行边界，不保证作者内容真实、适宜，也不保证生成模型完全遵守叙事要求。
 
@@ -77,4 +77,4 @@ characters:
 npm run build:demo
 ```
 
-生成的[示例 ZIP](<../demo/graystone.zip>)会经过正式解析器验证。内置初始化可使用受信任的 `store.importDirectory()` 读取[示例目录](<../demo/README.md>)；**不要把文件系统路径导入接口暴露给远端用户**。
+生成的[示例 ZIP](<../demo/curtain-castle.zip>)会经过正式解析器验证。内置初始化可使用受信任的 `store.importDirectory()` 读取[示例目录](<../demo/README.md>)；**不要把文件系统路径导入接口暴露给远端用户**。

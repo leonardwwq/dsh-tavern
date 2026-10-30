@@ -5,7 +5,7 @@ import { parse } from 'yaml';
 import { applyCheck, applyEncounter, canonicalJson, cloneJson, contentHash, d20Check, initialCampaignState, moveScene, publicCampaign, restPlayer, rollD20, validateContentPath, validateScript } from '../lib/core.js';
 
 async function demo() {
-  const read = async (file) => parse(await readFile(new URL(`../demo/graystone/${file}`, import.meta.url), 'utf8'));
+  const read = async (file) => parse(await readFile(new URL(`./fixtures/graystone/${file}`, import.meta.url), 'utf8'));
   return validateScript({ manifest: await read('manifest.yaml'), adventure: await read('adventure.yaml'), characters: await Promise.all(['warrior', 'ranger', 'cleric'].map((name) => read(`characters/${name}.yaml`))), assets: {} });
 }
 async function campaign() {

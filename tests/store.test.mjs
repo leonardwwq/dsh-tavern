@@ -10,7 +10,7 @@ import { zipSync } from 'fflate';
 import { createStore, parseArchive } from '../lib/store.js';
 import { IMPORT_LIMITS } from '../lib/core.js';
 
-const builtin = fileURLToPath(new URL('../demo/graystone/', import.meta.url));
+const builtin = fileURLToPath(new URL('./fixtures/graystone/', import.meta.url));
 const cultivation = { createExternalState: ({ initialState }) => structuredClone(initialState) };
 const key = 'graystone-mine@1.0.0';
 async function temporary(t) {
