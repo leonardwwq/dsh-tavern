@@ -19,7 +19,7 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 // Real Cordis owns all service injection, scope layers, policy execution, prompt
 // assembly, and concurrent teardown. Only the application seams are fake: no
 // listener, model, browser, active profile, or replacement server is started.
-test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, and reopens storage', {
+test('real Cordis boots tavern, seals narrator/recorder scopes, drains concurrent unload, and reopens storage', {
   skip: !runtime && 'Set DSH_RUNTIME_DIR to the installed @deepseek-ai directory', timeout: 15000
 }, async () => {
   const load = name => import(pathToFileURL(join(runtime, name, 'lib/index.js')));
@@ -30,8 +30,20 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
   const directory = await mkdtemp(join(root, '.test-cordis-'));
   const ctx = new Context();
   const providers = [], scopes = [], agents = new Map(), routes = new Map(), events = new Map(), modes = new Map(), activations = [];
-  let game, serviceContext, blockNextNpc = false, published = deferred();
-  let sequence = 0;
+  let game, serviceContext, blockNextRecording = false, published = deferred();
+  let sequence = 0, startedCampaignId;
+  const store = () => globalThis[Symbol.for('dsh-tavern/stores.v1')].get(directory).store;
+  async function until(predicate) {
+    for (let i = 0; i < 1000; i++) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 2)); }
+    assert.fail('Timed out waiting for background recorder');
+  }
+  async function commit(agent, seq, text) {
+    const stream = frame => ctx.serial(scopeTarget(agent, agent), 'agent/assistant-stream', { agent, frame });
+    await stream({ type: 'start', attemptId: `attempt-${seq}`, turn: 1, step: 1 });
+    events.set(agent.id, [{ seq: 1, type: 'turn/start' }, { seq, type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]);
+    await stream({ type: 'end', attemptId: `attempt-${seq}`, outcome: { kind: 'committed', eventType: 'assistant/message', seq } });
+    await ctx.serial(scopeTarget(agent, agent), 'agent/turn-stopping', { agent, turn: 1, signal: signal() });
+  }
   const signal = () => new AbortController().signal;
   const schemas = agent => ctx.tools.schemas(agent).map(tool => tool.name).sort();
   const execute = (agent, name, args = {}) => ctx.tools.execute({ callId: `cordis-test-${++sequence}`, name, arguments: args, agent, signal: signal() });
@@ -46,6 +58,7 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
   });
   const cultivation = {
     apiVersion: 1, createExternalState: external.createExternalState, renderExternalCard: external.renderExternalCard,
+    async developExternalState({ state }) { return { state, changes: [], pendingTasks: [] }; },
     processExternalEvent: input => external.processExternalEvent(input, async () => ({ relevance: 1, valence: 0.5, arousal: 0.3, relationshipRelevance: 1, uncertainty: 0 })),
     setExternalSessionMode(id, mode) { modes.set(id, mode); }, clearExternalSessionMode(id) { modes.delete(id); }
   };
@@ -98,10 +111,13 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
         const assembly = await ctx.systemPrompt.assemble({ scope: child, agent: child });
         assert.deepEqual(assembly.sections.map(section => section.name), ['tavern:npc']);
         const prompt = renderPrompt(assembly);
-        const decision = Boolean(spec.request.outputSchema.properties.kind);
-        assert.match(prompt, /PRIVATE_(BRAN|LYRA|ELIN)/);
-        assert.equal((prompt.match(/PRIVATE_(?:BRAN|LYRA|ELIN)/g) ?? []).length, 1);
-        assert.doesNotMatch(prompt, /PRIVATE_DM_SECRET|ORDINARY_ASSISTANT/);
+        assert.ok(spec.request.outputSchema.properties.items);
+        assert.equal(spec.request.outputSchema.properties.kind, undefined);
+        assert.match(prompt, /RECORD_PROSE/);
+        assert.doesNotMatch(prompt, /PRIVATE_DM_SECRET|PRIVATE_BRAN|PRIVATE_LYRA|PRIVATE_ELIN|ORDINARY_ASSISTANT/);
+        const committed = await globalThis[Symbol.for('dsh-tavern/stores.v1')].get(directory).store.getCampaign(startedCampaignId);
+        assert(committed.state.log.some(entry => entry.role === 'dm' && entry.text.includes('RECORD_PROSE')));
+        assert(Object.values(committed.state.storyTasks).some(task => task.status === 'pending'));
         const forbidden = await execute(child, 'bash');
         assert.equal(forbidden.isError, true);
         assert.equal((await execute(child, 'ask_user_question')).isError, true);
@@ -109,16 +125,18 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
         let escaped = false;
         const escape = child.ctx.tools.register(definition('escape', async () => { escaped = true; return {}; }));
         try { assert.equal((await execute(child, 'escape')).isError, true); assert.equal(escaped, false); } finally { escape(); }
-        const submitted = await execute(child, 'structured_output', decision
-          ? { kind: 'observe', targetId: 'player', visibility: 'public', reason: '目前没有需要介入的事', evidenceIds: [], publicText: '', read: '', shift: '', next: '' }
-          : { speech: '我会自己判断。', action: '检查营地脚印。' });
+        const submitted = await execute(child, 'structured_output', {
+          summary: '已交付钱袋', sceneId: '', location: '营地',
+          items: [{ id: `item-${activations.length + 1}`, name: '钱袋', quantity: 1, description: '已交付', removed: false }],
+          npcs: [{ npcId: 'bran', speech: '我看见了。', observations: ['布兰看见玩家收到钱袋'] }], events: []
+        });
         assert.equal(submitted.isError, false);
-        assert.equal(decision ? report.kind : report.speech, decision ? 'observe' : '我会自己判断。');
+        assert.equal(report.summary, '已交付钱袋');
         const record = { child, prompt, disposed: false, spec };
         activations.push(record);
         let result;
-        if (blockNextNpc) {
-          blockNextNpc = false;
+        if (blockNextRecording) {
+          blockNextRecording = false;
           result = new Promise(resolve => {
             const aborted = () => resolve({ stopReason: 'aborted', output: [] });
             if (spec.signal.aborted) aborted(); else spec.signal.addEventListener('abort', aborted, { once: true });
@@ -136,7 +154,8 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
     } }));
     await game;
     assert.equal(game.state, 2);
-    assert.equal(routes.size, 7);
+    assert.equal(routes.size, 8);
+    assert(routes.has('/tavern/api/retry-recording'));
     // Retain the original mine as an explicit ABI/rule-test fixture only.
     await globalThis[Symbol.for('dsh-tavern/stores.v1')].get(directory).store.importDirectory(join(root, 'tests/fixtures/graystone'));
     const dm = newAgent('cordis-dm');
@@ -144,28 +163,37 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
     await emitCreated(dm); await emitCreated(ordinary);
     assert.deepEqual(schemas(dm), ['ask_user_question', 'bash', 'read']);
     const started = await request('start', { sessionId: dm.id, scriptKey: 'graystone-mine@1.0.0' });
-    assert(started.campaign.id);
-    assert.deepEqual(schemas(dm), [...DM_TOOLS, 'ask_user_question'].sort());
+    assert(started.campaign.id); startedCampaignId = started.campaign.id;
+    assert.deepEqual(DM_TOOLS, ['tavern_status', 'tavern_check', 'tavern_combat', 'tavern_rest']);
+    assert.deepEqual(schemas(dm), [...DM_TOOLS].sort());
     assert.deepEqual(schemas(ordinary), ['ask_user_question', 'bash', 'read']);
     assert.equal(dm.followups.length, 1);
+    assert.equal(dm.followups[0].synthetic, true);
     const assembly = await ctx.systemPrompt.assemble({ scope: dm, agent: dm });
     assert.deepEqual(assembly.sections.map(section => section.name), ['tavern:dm']);
-    assert.match(renderPrompt(assembly), /PRIVATE_DM_SECRET/);
+    assert.match(renderPrompt(assembly), /PRIVATE_DM_SECRET/, 'v1 retains its legacy private DM context');
     assert.doesNotMatch(renderPrompt(assembly), /ORDINARY_ASSISTANT/);
     assert.equal((await execute(dm, 'bash')).isError, true);
     assert.equal((await execute(dm, 'tavern_status')).isError, false);
     assert.equal((await preStep(dm, 'first-player-action')).kind, 'enter');
-    const spoken = await execute(dm, 'tavern_speak', { npcId: 'bran' });
-    assert.equal(spoken.isError, false, JSON.stringify(spoken));
-    assert.equal(spoken.value.speech, '我会自己判断。');
-    assert.equal(activations.filter(record => !record.spec.request.outputSchema.properties.kind).length, 1);
-    assert(activations.some(record => record.spec.request.outputSchema.properties.kind));
+    assert.equal(activations.length, 0, 'pre-step must not launch per-NPC approval');
+    assert.equal((await execute(dm, 'tavern_speak', { npcId: 'bran' })).isError, true);
+    assert.equal(activations.length, 0);
+    await commit(dm, 2, 'RECORD_PROSE：钱袋已经交付，布兰看见了。');
+    await published.promise;
+    await until(async () => (await store().getCampaign(startedCampaignId)).state.storyTasks[`${dm.id}:message:2`].status === 'recorded');
+    assert.equal(activations.length, 1, 'exactly one record task, not one task per NPC');
     assert(activations.every(record => record.disposed && !modes.has(record.child.id)));
+    let saved = await store().getCampaign(startedCampaignId);
+    assert.equal(saved.state.freeActionItems.length, 1);
+    assert.equal(saved.state.npcs.bran.processedEventIds.length, 1);
+    await ctx.serial(scopeTarget(dm, dm), 'agent/turn-stopping', { agent: dm, turn: 1, signal: signal() });
+    await new Promise(resolve => setImmediate(resolve)); assert.equal(activations.length, 1);
     const beforeChoice = activations.length;
     const answer = await execute(dm, 'ask_user_question', { questions: [{ id: 'action', question: '你准备怎么做？' }] });
-    assert.equal(answer.isError, false);
-    assert.deepEqual(answer.value, { answers: [{ id: 'action', selected: ['保护队友'], custom: '我挡在布兰身前' }] });
-    assert(activations.length > beforeChoice, 'real ToolRuntime canonical answer triggers autonomous decisions');
+    assert.equal(answer.isError, true);
+    assert.equal(activations.length, beforeChoice, 'blocked game question must not trigger decisions');
+    assert.equal((await execute(ordinary, 'ask_user_question', { questions: [{ id: 'action', question: '你准备怎么做？' }] })).isError, false);
     assert.equal(dm.followups.length, 1, 'no duplicate synthetic user turn');
 
     // A cold/reopened NPC prefix is fail-closed, even with its own report tool.
@@ -175,17 +203,19 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
     assert.equal((await execute(dormant, 'structured_output')).isError, true);
     assert.equal((await preStep(dormant, 'unrelated-task')).kind, 'reject');
 
-    // Unload while a registered real ToolRuntime dispatch owns an NPC call.
+    // Unload during the plugin-owned background recording task.
     // Cordis unwinds all independent effects concurrently, not a hand-ordered
     // fake cleanup list; the host must abort, drain, and close storage itself.
     await preStep(dm, 'second-player-action');
-    published = deferred(); blockNextNpc = true;
-    const pending = execute(dm, 'tavern_speak', { npcId: 'bran' });
-    await published.promise;
+    published = deferred(); blockNextRecording = true;
+    await commit(dm, 3, 'RECORD_PROSE：第二轮正文仍须保留。');
+    const blocked = await published.promise;
+    saved = await store().getCampaign(startedCampaignId);
+    assert.equal(saved.state.log.find(entry => entry.eventId === `${dm.id}:message:3`).text, 'RECORD_PROSE：第二轮正文仍须保留。');
+    assert.equal(saved.state.storyTasks[`${dm.id}:message:3`].status, 'pending');
     await game.dispose();
     game = null;
-    const cancelled = await pending;
-    assert.equal(cancelled.isError, true);
+    assert.equal(blocked.spec.signal.aborted, true);
     assert(activations.every(record => record.disposed));
     assert.equal(routes.size, 0);
     assert.deepEqual(schemas(dm), ['ask_user_question', 'bash', 'read']);
@@ -194,10 +224,17 @@ test('real Cordis boots tavern, seals DM/NPC scopes, drains concurrent unload, a
     assert(!restored.sections.some(section => section.name.startsWith('tavern:')));
     assert.equal(globalThis[Symbol.for('dsh-tavern/stores.v1')].has(directory), false);
     const reopened = await createStore({ dir: directory, cultivation });
-    try { assert.equal((await reopened.getBinding(dm.id)).campaignId, started.campaign.id); } finally { await reopened.close(); }
+    try {
+      assert.equal((await reopened.getBinding(dm.id)).campaignId, started.campaign.id);
+      const persisted = await reopened.getCampaign(startedCampaignId);
+      assert.equal(persisted.state.freeActionItems.length, 1, 'cancelled record cannot commit ghost items');
+      assert.equal(persisted.state.storyTasks[`${dm.id}:message:2`].status, 'recorded');
+      assert.equal(persisted.state.storyTasks[`${dm.id}:message:3`].status, 'failed');
+      assert(persisted.state.log.some(entry => entry.text === 'RECORD_PROSE：第二轮正文仍须保留。'));
+    } finally { await reopened.close(); }
     // Reload must reinstall cleanly: no duplicate mode declarations/sections.
     game = await ctx.plugin(tavern, { dataDir: directory });
-    assert.deepEqual(schemas(dm), [...DM_TOOLS, 'ask_user_question'].sort());
+    assert.deepEqual(schemas(dm), [...DM_TOOLS].sort());
     assert.equal((await execute(dm, 'tavern_status')).isError, false);
     await game.dispose(); game = null;
     assert.deepEqual(schemas(dm), ['ask_user_question', 'bash', 'read']);

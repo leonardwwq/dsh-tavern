@@ -42,7 +42,7 @@ export async function checkPackage(base = root) {
   assert.equal(pkg.dependencies?.['dsh-cultivation'], CULTIVATION_RANGE, 'Declared dependency must equal the runtime compatibility range');
   assert.equal(pkg.bundleDependencies ?? pkg.bundledDependencies, undefined, 'tavern must not vendor cultivation: install it as a dependency');
   assert.equal(CULTIVATION_API_VERSION, 1);
-  assert(satisfiesRange('0.4.1', CULTIVATION_RANGE), 'The runtime range must admit the version tavern declares');
+  assert(satisfiesRange('0.4.3', CULTIVATION_RANGE), 'The runtime range must admit the required cultivation development release');
   assert.equal(pkg.dsh?.client?.platform, 'web');
   const patches = [pkg.dsh?.bundle?.patch].flat();
   assert(patches.length && patches.every(p => typeof p === 'string'), 'Bundle patch declaration required');

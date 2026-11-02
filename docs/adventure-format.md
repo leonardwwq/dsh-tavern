@@ -32,7 +32,7 @@ characters:
   - characters/cleric.yaml
 ```
 
-当前只支持 `formatVersion: 1` 和 `cultivation.external.v1`。内容为 YAML/JSON 与可选 `assets/` 下的 PNG、JPEG、WebP、GIF；资源以 base64 随版本保存，当前示例无需图片。不得包含未引用文档、可执行文件、符号链接或其他类型资源。
+支持 `formatVersion: 1` 和 `formatVersion: 2`，能力为 `cultivation.external.v1`。v2 场景节拍、信息分层和世界角色的写法见 [v2 框架](<adventure-framework-v2.md>)。内容为 YAML/JSON 与可选 `assets/` 下的 PNG、JPEG、WebP、GIF；资源以 base64 随版本保存，当前示例无需图片。不得包含未引用文档、可执行文件、符号链接或其他类型资源。
 
 ## 声明式内容字段
 
@@ -46,8 +46,10 @@ characters:
 | 场景 | `id/place/opening/cast/exits`，可选 `timeOfDay/npcGoals/checks/encounter/allowRest/ending` |
 | 出口 | `exits[].requires` 是平铺旗标等值条件，例如 `{hidden_route: true}`，目的地必须存在 |
 | 检定 | `id/label/dc/bonus?/successFlags?/failureFlags?/repeatable?`；默认不可重掷，成功/失败只应用作者定义的旗标 |
-| 遭遇 | `id/name/hp/armorClass/attackBonus?/damage?/rewardFlags?` |
-| 休整与结束 | `allowRest: true` 允许休整恢复；`ending: true` 进入即完成 |
+| 遭遇 | `id/name/hp/armorClass/attackBonus?/damage?/rewardFlags?`；可选 `materials: [{id, name, collectible: true}]` 提供可收集素材的作者参考 |
+| 休整与结束 | `allowRest: true` 允许数值休整恢复；`ending: true` 是结尾参考，正文实际结束后才记录完成 |
+
+工作区叙事优先版中，普通查看、交付、拾取和移动由主持 LLM 根据上下文自然叙述，不再以关键词、固定句式或素材白名单审批。`exits/requires/beats` 保留供旧格式和场景参考，正文位置整理不调用出口锁；数值检定和战斗仍以真实工具结果为准，不能靠记录器改变 HP/骰点。结构化只记录正文已发生的事实，不凭玩家愿望发放物品。旧存档保持冻结快照，插件更新不自动替换人设和世界设定。
 
 完整字段与分支以[内置剧本](<../demo/curtain-castle/adventure.yaml>)及其[角色内容](<../demo/curtain-castle/characters/warrior.yaml>)为例。DM 背景/秘密、角色 `fields` 与 `initialState` 不出现在公共列表中。NPC 不替代骰点，DM 不能临时传入任意旗标。
 

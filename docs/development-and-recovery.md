@@ -4,11 +4,11 @@
 
 ## 环境与依赖装载
 
-需要 Node.js 22+、DSH Web、默认模型和 `spawn` 服务；以 DSH 0.2.1-rc.2 公开接口实现。tavern 单向依赖 `dsh-cultivation: ^0.4.1`：装 tavern 时由 profile 的 pnpm 从 registry 一并安装，tavern 归档里**不含** cultivation 副本（0.2.0 及更早版本曾把它打进归档，0.2.1 起改为普通依赖）。cultivation 可以独立使用，不反向依赖 tavern。
+需要 Node.js 22+、DSH Web、默认模型和 `spawn` 服务；以 DSH 0.2.1-rc.2 公开接口实现。tavern 单向依赖 `dsh-cultivation: ^0.4.3`：装 tavern 时由 profile 的 pnpm 从 registry 一并安装，tavern 归档里**不含** cultivation 副本（0.2.0 及更早版本曾把它打进归档，0.2.1 起改为普通依赖）。cultivation 可以独立使用，不反向依赖 tavern。
 
 [装载配置](<../cordis.patch.yml>)提供 cultivation 兜底启动，因为 npm 依赖不等于插件启用。在同一标准装载组已配置 cultivation 时让位，避免重复启动；判定使用当前 DSH Loader 的 `!!js` 机制，已覆盖真实 Loader 和嵌套依赖解析测试。复杂嵌套装载组或表达式禁用行不在首期自动去重保证范围内。
 
-启动时 tavern 还会校验实际挂载的服务：`apiVersion` 必须为 1，服务版本必须落在 `^0.4.1`（只比较 major.minor.patch，`0.4.x` 的预发布号可用），否则拒绝启动并打印可复制执行的升级命令。服务自 cultivation 0.4.2 起在 `ctx.cultivation.version` 上报告自身版本；更旧的 0.4.1 没有该字段，tavern 退回读取自己依赖树里的 manifest。
+启动时 tavern 还会校验实际挂载的服务：`apiVersion` 必须为 1，服务版本必须落在 `^0.4.3`（只比较 major.minor.patch，`0.4.x` 的预发布号可用），否则拒绝启动并打印可复制执行的升级命令。服务还必须提供 `developExternalState` 等必需方法；0.4.3 提供完整的幕后人物发展任务。服务版本来自 `ctx.cultivation.version`；缺少版本字段时仍保留依赖 manifest 回退，但不能绕过能力检查。
 
 新增 bundle 后重启原 DSH 进程，刷新原 Web 地址。客户端是直接可加载模块，不需要替代 Web 服务；仅修改源码不代表自动热更新。
 
@@ -48,13 +48,13 @@ node scripts/install-local.mjs --execute --profile web
 
 ### 审核归档后再发布
 
-归档里不应该出现 `node_modules/`：cultivation 由 registry 提供，版本与来源才对用户可见。发布顺序固定为**先 cultivation、再 tavern**，否则 `^0.4.1` 依赖会解析到旧版本：
+归档里不应该出现 `node_modules/`：cultivation 由 registry 提供，版本与来源才对用户可见。发布顺序固定为**先 cultivation、再 tavern**，否则 `^0.4.3` 依赖会解析到旧版本：
 
 ```sh
 node scripts/install-local.mjs --pack-only
-tar tzf ./dist/dsh-tavern-adventure-0.2.1.tgz | grep -c '^package/node_modules/' # 必须是 0
-npm publish --dry-run ./dist/dsh-tavern-adventure-0.2.1.tgz
-npm publish ./dist/dsh-tavern-adventure-0.2.1.tgz --access public
+tar tzf ./dist/dsh-tavern-adventure-0.3.0.tgz | grep -c '^package/node_modules/' # 必须是 0
+npm publish --dry-run ./dist/dsh-tavern-adventure-0.3.0.tgz
+npm publish ./dist/dsh-tavern-adventure-0.3.0.tgz --access public
 ```
 
 归档审核应确认版本、文档、示例、许可齐全，且 `package.json` 里没有 `bundleDependencies`、tar 内没有 `node_modules/`。helper 本身不执行 npm 发布、Git 提交/推送或服务重启。上面的 publish 是维护者的显式发布步骤，不是普通玩家安装步骤。
@@ -62,7 +62,7 @@ npm publish ./dist/dsh-tavern-adventure-0.2.1.tgz --access public
 审核包也可以交给 DSH 原生 CLI 安装：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add --workspace-root ./dist/dsh-tavern-adventure-0.2.1.tgz
+npx @deepseek-ai/dsh plugin --profile web add --workspace-root ./dist/dsh-tavern-adventure-0.3.0.tgz
 ```
 
 GitHub 项目名仍为 dsh-tavern，npm 发布名为 `dsh-tavern-adventure`。若曾安装本地旧名 `dsh-tavern` bundle，迁移前先备份，并在原 profile 中停用/移除旧 bundle 配置，避免新旧同时加载；不要删除存档目录。内部存储/API 标识继续兼容旧名，不因 npm 改名而清空存档。
@@ -76,7 +76,10 @@ GitHub 项目名仍为 dsh-tavern，npm 发布名为 `dsh-tavern-adventure`。�
 ### 一致性与备份
 
 - 一个存档同时只有一个推进会话；输入、操作与事件具有幂等标识。普通旧会话不能转游戏，接管只发生在新会话，并使旧会话只读。
-- 任意 NPC 调用或写盘失败不提交半个角色状态。角色生成失败可短暂未回应，关系评价失败不伪造好感变化。
+- 正文先保存，后台记录与人物养成分阶段提交。提取失败不修改物品；已经成功的人物评价可保留，后续发展任务失败不伪造完成，不重演剧情。
+- 后台失败显示提示并允许显式「重试记录」；自动处理停在失败处，不无限重试。普通剧情仍读取未整理正文，面板落后不等于故事没发生。
+- 会话首次启用新版时，在生成前建立持久化 `narrationRecoveryFloor`，不重放升级前历史。之后尚未入冒险存档的 DSH 已提交正文可跨回合和重载找回，按消息 ID 去重。
+- 若异常退出丢失当时的来源视野，只恢复正文和可提取的物品/位置，不从当前在场角色猜历史经历；这类恢复不补写 NPC 记忆。DSH 原消息本身也丢失时，不能凭空恢复正文。
 - 主存储损坏或丢失会明确报错，**不会自动重置为空白数据**。不要靠删除文件“修复”错误。
 - 在停止 DSH 后备份完整数据目录，保留已知正常备份；不要手工编辑正在使用的主存储。
 
@@ -92,14 +95,15 @@ GitHub 项目名仍为 dsh-tavern，npm 发布名为 `dsh-tavern-adventure`。�
 |---|---|
 | [内容与规则](<../lib/core.js>) | 校验、安全公开投影、检定、战斗和转场 |
 | [本地存储](<../lib/store.js>) | 导入、快照、原子事务、所有权接管、进程锁与恢复 |
-| [游戏运行时](<../lib/runtime.js>) | 真实输入、公开对白、规则操作、幂等与关系事件 |
-| [自主决策调度](<../lib/agency.js>) | 独立决策、感知上下文、证据与私有判断 |
-| [自主行动规则](<../lib/autonomy.js>) | 能力/目标校验、协助/干扰、挡伤代价、公开/私有投影 |
+| [游戏运行时](<../lib/runtime.js>) | 统一主持上下文、真实输入、正文提交、后台记录与人物发展任务、数值工具幂等 |
+| [正文事实整理](<../lib/story.js>) | 只提取已提交正文的物品、位置与 NPC 亲历事件；原子应用、来源检查与去重 |
+| [旧自主决策](<../lib/agency.js>) | 保留旧模块兼容，不再进入主持人的运行链 |
+| [旧自主行动规则](<../lib/autonomy.js>) | 在场角色投影及底层兼容；旧动作审批不暴露为主持工具 |
 | [宿主适配](<../lib/index.js>) | 认证 API、会话准入、DM 提示词/工具隔离、子 agent 生命周期 |
 | [客户端](<../lib/client.js>) | 原生设置、新会话选择和游戏面板 |
 | [本地安装器](<../scripts/install-local.mjs>) | 默认 dry run，显式打包或指定 profile 安装 |
 
-子 agent 结构化报告与感知隔离详见[NPC 架构说明](<npc-autonomy.md#独立-agent-与私有状态>)。框架工具层只开放游戏能力；模型的沉浸叙事与判断质量不能由工具权限保证。
+统一主持与幕后人物积累详见[NPC 架构说明](<npc-autonomy.md>)。`spawn` 仅用于单个幕后记录器，不再分别扮演现场 NPC。框架工具层只保留查询、数值检定、战斗和休整；模型的沉浸叙事与判断质量不能由工具权限保证。
 
 ## 验证
 

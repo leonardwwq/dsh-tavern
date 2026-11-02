@@ -38,6 +38,8 @@ async function harness(initial = base()) {
   const documentEvents = new Map();
   const intervals = new Map();
   let timerId = 0;
+  let now = 100000;
+  class MockDate extends Date { constructor(...args) { super(...(args.length ? args : [now])); } static now() { return now; } }
   const styles = [];
   const React = {
     Fragment: 'fragment',
@@ -69,7 +71,7 @@ async function harness(initial = base()) {
     removeEventListener(name) { windowEvents.delete(name); }
   };
   const context = vm.createContext({
-    window, document, console, AbortController, Uint8Array,
+    window, document, console, AbortController, Uint8Array, Date: MockDate,
     setTimeout() { return ++timerId; }, clearTimeout() {},
     setInterval(fn) { const id = ++timerId; intervals.set(id, fn); return id; }, clearInterval(id) { intervals.delete(id); },
     btoa(value) { return Buffer.from(value, 'binary').toString('base64'); },
@@ -100,7 +102,7 @@ async function harness(initial = base()) {
     };
   }
   return { required, registrations, records, styles, intervals, windowEvents, documentEvents,
-    instance, component(id) { return registrations.get(id).component; }, setState(value) { hostState = value; },
+    instance, component(id) { return registrations.get(id).component; }, setState(value) { hostState = value; }, setTime(value) { now = value; },
     dispose() { cleanups.forEach((fn) => fn && fn()); }
   };
 }
@@ -143,20 +145,41 @@ test('entry uses actual blank hook, never offers old normal sessions a picker', 
 
 test('script must be chosen before save controls; server canStart remains authoritative', async () => {
   const env = await harness({ ...base(), canStart: false });
-  const { picker } = await openPicker(env);
+  const { picker, overlay } = await openPicker(env);
   let tree = picker.render();
   assert.equal(button(tree, '创建并永久绑定'), undefined);
   assert.equal(button(tree, '选择此剧本').props.disabled, true);
-  assert.equal(button(tree, '下一步：选择存档').props.disabled, true);
+  assert.equal(button(overlay.render().props.footer, '下一步：选择存档').props.disabled, true);
   assert.match(text(tree), /宿主状态为最终依据/);
+  env.dispose();
+});
+
+test('next step stays in modal footer and follows current selection', async () => {
+  const env = await harness();
+  const { picker, overlay } = await openPicker(env);
+  let panel = overlay.render();
+  assert.equal(button(panel.props.footer, '下一步：选择存档').props.disabled, true);
+  assert.ok(button(panel.props.footer, '刷新'));
+  assert.ok(button(panel.props.footer, '关闭'));
+  assert.equal(button(picker.render(), '下一步：选择存档'), undefined);
+  button(picker.render(), '选择此剧本').props.onClick();
+  panel = overlay.render();
+  assert.equal(button(panel.props.footer, '下一步：选择存档').props.disabled, false);
+  button(panel.props.footer, '下一步：选择存档').props.onClick();
+  assert.equal(button(overlay.render().props.footer, '下一步：选择存档'), undefined);
+  assert.ok(button(picker.render(), '返回选择剧本'));
+  button(picker.render(), '返回选择剧本').props.onClick();
+  assert.equal(button(overlay.render().props.footer, '下一步：选择存档').props.disabled, false);
+  button(overlay.render().props.footer, '关闭').props.onClick();
+  assert.equal(overlay.render(), null);
   env.dispose();
 });
 
 test('new adventure revalidates live blank before POST and rejects a raced first prompt', async () => {
   const env = await harness();
-  const { picker, chip, props } = await openPicker(env);
+  const { picker, chip, props, overlay } = await openPicker(env);
   let tree = picker.render(); button(tree, '选择此剧本').props.onClick();
-  tree = picker.render(); button(tree, '下一步：选择存档').props.onClick();
+  button(overlay.render().props.footer, '下一步：选择存档').props.onClick();
   tree = picker.render();
   chip.render({ ...props, useSession: (select) => select({ blank: true, promptAttempted: true }) });
   await button(tree, '创建并永久绑定').props.onClick(); await settle();
@@ -170,7 +193,7 @@ test('takeover requires explicit checkbox and sends one writer takeover request'
   const env = await harness(state);
   const { picker, overlay } = await openPicker(env);
   let tree = picker.render(); button(tree, '选择此剧本').props.onClick();
-  tree = picker.render(); button(tree, '下一步：选择存档').props.onClick();
+  button(overlay.render().props.footer, '下一步：选择存档').props.onClick();
   tree = picker.render(); button(tree, '接续到此会话…').props.onClick();
   tree = picker.render();
   assert.match(text(tree), /原所属会话将永久失去推进权限/);
@@ -255,6 +278,7 @@ test('oversized ZIP is rejected before reading bytes or calling import API', asy
 
 test('game projection never renders unexpected DM or NPC secrets and only uses slot sessionId', async () => {
   const publicCampaign = campaign();
+  publicCampaign.history = [{ role: 'player', text: '我走向大门。', id: 'p1' }, { role: 'dm', text: '门缓缓打开。', id: 'd1' }];
   publicCampaign.dm = { secrets: 'DM_HIDDEN_SECRET' };
   publicCampaign.npcs = { a: { memory: 'NPC_PRIVATE_MEMORY' } };
   publicCampaign.party[0].secrets = 'PARTY_PRIVATE_SECRET';
@@ -272,6 +296,9 @@ test('game projection never renders unexpected DM or NPC secrets and only uses s
   const gameNode = named(overlay.render(), 'GamePanel');
   const tree = env.instance(gameNode.type, gameNode.props).render();
   assert.doesNotMatch(text(tree), /DM_HIDDEN_SECRET|NPC_PRIVATE_MEMORY|PARTY_PRIVATE_SECRET|PRIVATE_REASON|STALE_ACTION_TEXT/);
+  assert.match(text(tree), /本局纪事/);
+  assert.match(text(tree), /你：我走向大门。/);
+  assert.match(text(tree), /DM：门缓缓打开。/);
   assert.match(text(tree), /旅人/);
   assert.match(text(tree), /自主行动：甲冒险掩护旅人/);
   assert.match(text(tree), /受伤/);
@@ -281,7 +308,46 @@ test('game projection never renders unexpected DM or NPC secrets and only uses s
   env.dispose();
 });
 
-test('window changes refresh mounted data; interval polls panels only and pauses when unmounted', async () => {
+test('turn progress shows safe phases and elapsed thresholds, then clears', async () => {
+  const state = { ...base(), binding: { readOnly: false }, campaign: campaign(), turnProgress: null };
+  const env = await harness(state);
+  const chip = env.instance(env.component('dsh-tavern-chip'), { sessionId: 'new', session: { blank: false } });
+  chip.render(); await settle();
+  assert.doesNotMatch(text(chip.render()), /处理中|等待/);
+  for (const [phase, label] of [['starting', '准备处理'], ['npc', '角色判断处理中'], ['tools', '规则结算处理中'], ['waiting_dm', '等待主持人处理'], ['output', '回合输出处理中']]) {
+    env.setState({ ...state, turnProgress: { phase, startedAt: 100000, updatedAt: 100000, secret: 'NPC_PRIVATE' } });
+    env.windowEvents.get('dsh-tavern:changed')(); await settle();
+    assert.match(text(chip.render()), new RegExp(label));
+    assert.doesNotMatch(text(chip.render()), /NPC_PRIVATE/);
+  }
+  env.setState({ ...state, turnProgress: { phase: 'waiting_dm', startedAt: 100000, updatedAt: 100000, lastFailure: { kind: 'transport', at: 100001, secret: 'PRIVATE_PROVIDER' } } });
+  env.windowEvents.get('dsh-tavern:changed')(); await settle();
+  assert.match(text(chip.render()), /曾记录模型传输异常（原因未确定）/);
+  assert.doesNotMatch(text(chip.render()), /PRIVATE_PROVIDER/);
+  env.setTime(109999); [...env.intervals.values()][0]();
+  assert.doesNotMatch(text(chip.render()), /已等待|仍在等待/);
+  env.setTime(110000); [...env.intervals.values()][0](); await settle();
+  assert.match(text(chip.render()), /已等待 10 秒/);
+  env.setTime(130000); [...env.intervals.values()][0]();
+  assert.match(text(chip.render()), /本次等待已超时，结果尚未确认；请勿重复提交/);
+  for (const phase of ['completed', 'stopped']) {
+    env.setState({ ...state, turnProgress: { phase, startedAt: 100000, updatedAt: 130000 } });
+    env.documentEvents.get('visibilitychange')(); await settle();
+    assert.doesNotMatch(text(chip.render()), /处理中|等待/);
+  }
+  env.setState({ ...state, turnProgress: { phase: 'cancelled', startedAt: 100000, updatedAt: 130000 } });
+  env.documentEvents.get('visibilitychange')(); await settle();
+  assert.match(text(chip.render()), /已请求停止；操作结果可能已保存/);
+  env.setState({ ...state, campaign: { ...campaign(), incompleteJudgments: 2 }, turnProgress: null });
+  env.windowEvents.get('dsh-tavern:changed')(); await settle();
+  assert.match(text(chip.render()), /2 位角色的自动判断未完成/);
+  env.setState({ ...state, binding: { readOnly: true }, turnProgress: { phase: 'npc', startedAt: 100000 } });
+  env.windowEvents.get('dsh-tavern:changed')(); await settle();
+  assert.doesNotMatch(text(chip.render()), /处理中|等待/);
+  chip.unmount(); env.dispose(); assert.equal(env.intervals.size, 0);
+});
+
+test('window changes refresh mounted data; interval polls active sessions and pauses when unmounted', async () => {
   const env = await harness();
   const chip = env.instance(env.component('dsh-tavern-chip'), { sessionId: 'new', session: { blank: true } });
   chip.render(); await settle();
@@ -291,4 +357,76 @@ test('window changes refresh mounted data; interval polls panels only and pauses
   chip.unmount();
   env.windowEvents.get('dsh-tavern:changed')(); await settle(); assert.equal(env.records.length, initial + 1);
   env.dispose();
+});
+
+
+async function openGame(env, sessionId = 'new') {
+  const chip = env.instance(env.component('dsh-tavern-chip'), { sessionId, session: { blank: false } });
+  chip.render(); await settle(); chip.render().props.onClick(); await settle();
+  const overlay = env.instance(env.component('dsh-tavern-panel'));
+  const node = named(overlay.render(), 'GamePanel');
+  return { chip, overlay, game: env.instance(node.type, node.props) };
+}
+
+test('recording pending and failure warnings keep prose authoritative; retry only acknowledges background submission', async () => {
+  const initial = { ...base(), canStart: false, binding: { sessionId: 'new', campaignId: 'save-1', readOnly: false }, campaign: { ...campaign(), storyRecording: { pending: 1, failed: 0, errors: [] }, history: [{ role: 'dm', id: 'd1', text: '公爵已经把钱袋交给你。' }] } };
+  const env = await harness(initial);
+  try {
+    const { overlay, game } = await openGame(env);
+    let tree = game.render();
+    assert.match(text(tree), /正文已保存.*后台整理.*以正文为准/);
+    assert.match(text(tree), /公爵已经把钱袋交给你/);
+    assert.equal(button(tree, '重试记录'), undefined);
+    const failed = { ...initial, campaign: { ...initial.campaign, storyRecording: { pending: 0, failed: 1, errors: ['本轮状态整理未完成；正文保留，可重试。'] } } };
+    env.setState(failed); env.windowEvents.get('dsh-tavern:changed')(); await settle();
+    tree = game.render(named(overlay.render(), 'GamePanel').props);
+    assert.match(text(tree), /本轮状态整理未完成；正文保留，可重试/);
+    assert.match(text(tree), /公爵已经把钱袋交给你/);
+    assert.equal(button(tree, '重试记录').props.disabled, false);
+    await button(tree, '重试记录').props.onClick(); await settle();
+    const posts = env.records.filter(record => record.options.method === 'POST');
+    assert.equal(posts.length, 1); assert.equal(posts[0].url, '/tavern/api/retry-recording'); assert.deepEqual(posts[0].body, { sessionId: 'new' });
+    const status = named(overlay.render(), 'Status');
+    const notice = text(env.instance(status.type, status.props).render());
+    assert.match(notice, /已提交后台重试；是否完成请查看记录状态/);
+    assert.doesNotMatch(notice, /记录成功|保存成功|记录已完成/);
+    tree = game.render(named(overlay.render(), 'GamePanel').props);
+    assert.match(text(tree), /本轮状态整理未完成/); // POST acknowledgement is not successful extraction.
+  } finally { env.dispose(); }
+});
+
+test('save-error warning is honest and readonly sessions cannot request recording retries', async () => {
+  for (const readOnly of [false, true]) {
+    const state = { ...base(), canStart: false, binding: { sessionId: 'new', campaignId: 'save-1', readOnly }, campaign: { ...campaign(), storyRecording: { pending: 0, failed: 0, errors: [], saveError: '正文已显示，但存档写入失败；不能确认已保存。' } } };
+    const env = await harness(state);
+    try {
+      const { game } = await openGame(env); const tree = game.render();
+      assert.match(text(tree), /存档写入失败；不能确认已保存/);
+      assert.doesNotMatch(text(tree), /正文已保存/);
+      const retry = button(tree, '重试记录');
+      if (readOnly) {
+        assert.equal(retry, undefined); assert.equal(nodes(tree, node => node.type === 'button').length, 0);
+        assert.equal(env.records.some(record => record.options.method === 'POST'), false);
+      } else {
+        assert.ok(retry); await retry.props.onClick(); await settle();
+        assert.deepEqual(env.records.find(record => record.url.endsWith('/retry-recording')).body, { sessionId: 'new' });
+      }
+    } finally { env.dispose(); }
+  }
+});
+
+test('recorded location overrides old scene opening and inventory displays quantities without HTML interpretation', async () => {
+  const state = { ...base(), canStart: false, binding: { sessionId: 'new', campaignId: 'save-1', readOnly: false }, campaign: { ...campaign(), storyLocation: { sceneId: 'gate', location: '维修亭内' }, inventory: [{ id: 'coin', name: '金币', quantity: 30 }, { id: 'old-key', name: '旧钥匙' }, { id: 'unsafe', name: '<img src=x onerror=alert(1)>', quantity: 2 }] } };
+  const env = await harness(state);
+  try {
+    const { game } = await openGame(env); const tree = game.render();
+    const headings = nodes(tree, node => node.type === 'h3').map(text);
+    assert.ok(headings.includes('维修亭内')); assert.ok(!headings.includes('雾门'));
+    assert.match(text(tree), /位置由正文整理，当前环境与剧情以主会话为准/);
+    assert.doesNotMatch(text(tree), /你站在门前/);
+    assert.match(text(tree), /金币 × 30/); assert.match(text(tree), /旧钥匙/);
+    assert.doesNotMatch(text(tree), /旧钥匙 × undefined|NaN/);
+    assert.match(text(tree), /<img src=x onerror=alert\(1\)> × 2/);
+    assert.equal(nodes(tree, node => node.props.dangerouslySetInnerHTML || node.type === 'img').length, 0);
+  } finally { env.dispose(); }
 });

@@ -1,7 +1,7 @@
 {
   "name": "dsh-tavern-adventure",
-  "version": "0.2.1",
-  "description": "Local script-driven dungeon adventures for DSH: DM sessions, independent NPC agents, and isolated saves.",
+  "version": "0.3.0",
+  "description": "LLM-led adventures for DSH with cultivation character development, narrative records, and isolated saves.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -49,7 +49,7 @@
     "prepack": "npm run check && npm run build:demo"
   },
   "dependencies": {
-    "dsh-cultivation": "^0.4.1",
+    "dsh-cultivation": "^0.4.3",
     "fflate": "^0.8.2",
     "yaml": "^2.8.1"
   },

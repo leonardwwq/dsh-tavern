@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Opt-in local release packaging. Merely invoking this script changes nothing.
 //
-// tavern 不再把 cultivation 打进归档：`dependencies` 声明 `^0.4.1`，安装时由
+// tavern 不再把 cultivation 打进归档：`dependencies` 声明 `^0.4.3`，安装时由
 // profile 的 pnpm 从 registry 拉取；DSH 会把所选 bundle 的依赖闭包登记进运行时
 // 解析表，所以 tavern 自己插入的 `tavern-cultivation` 行照样能解析到它。用户若
 // 另外独立安装 cultivation，那行会通过 `!!js` 表达式自动让位，不会双挂载。

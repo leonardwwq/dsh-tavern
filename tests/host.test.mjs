@@ -16,13 +16,11 @@ const user = (id, text = '我请求布兰说说他的看法。') => ({ id, role:
 // Mirrors the actual DSH ABI: agent.ctx contributions are scoped; restrict masks
 // inherited tools only; guards are monotonic; startActivation publishes agent/created
 // before it returns and caller owns activation disposal. No real provider is used.
-async function setup(t, { directory, ids = ['fresh', 'next'], autoApply = true } = {}) {
+async function setup(t, { directory, ids = ['fresh', 'next'], autoApply = true, npcTimeoutMs = 1000 } = {}) {
   const dir = directory ?? await mkdtemp(path.join(os.tmpdir(), 'dsh-tavern-host-test-'));
   const routes = new Map(), hooks = new Map(), agents = new Map(), modes = new Map(), events = new Map();
   const effects = [], calls = [], npcCalls = [], decisionCalls = [], children = [];
-  let closed = false, rejection, runNpc = async (spec) => spec.request.outputSchema.properties.kind
-    ? { kind: 'observe', targetId: 'player', visibility: 'public', reason: '目前没有需要介入的事', evidenceIds: [], publicText: '', read: '', shift: '', next: '' }
-    : { speech: '我会自己判断。', action: '观察营地的脚印。' };
+  let closed = false, rejection, runNpc = async () => report();
   const noop = () => {};
   const globalToolError = () => { throw new Error('Plugin must not modify global tools'); };
   function scopedAgent(id, meta = {}) {
@@ -67,6 +65,7 @@ async function setup(t, { directory, ids = ['fresh', 'next'], autoApply = true }
   }
   const cultivation = {
     apiVersion: 1, createExternalState, renderExternalCard,
+    async developExternalState({ state }) { return { state, changes: [], pendingTasks: [] }; },
     processExternalEvent(input) { return processExternalEvent(input, async () => ({ relevance: 1, valence: 0.5, arousal: 0.3, relationshipRelevance: 1, uncertainty: 0 })); },
     setExternalSessionMode(id, mode) { modes.set(id, mode); }, clearExternalSessionMode(id) { modes.delete(id); }
   };
@@ -101,7 +100,7 @@ async function setup(t, { directory, ids = ['fresh', 'next'], autoApply = true }
         assert.equal(child.sections[0].complete, true);
         assert.equal(child.sections[0].interpolate, false);
         assert.equal(child.definitions.size, 0); // structured_output belongs to activation manager.
-        const record = { spec, child, disposed: false }; (spec.request.outputSchema.properties.kind ? decisionCalls : npcCalls).push(record);
+        const record = { spec, child, prompt: child.sections[0].text(), disposed: false }; (spec.request.outputSchema.properties.kind ? decisionCalls : npcCalls).push(record);
         const result = Promise.resolve().then(() => runNpc(spec, child)).then((structured) => ({ stopReason: 'completed', structured }));
         return { childId: spec.childId, messageId: 'child-message', result, async dispose() { record.disposed = true; await emit('agent/disposed', { agent: child }); } };
       }
@@ -120,7 +119,7 @@ async function setup(t, { directory, ids = ['fresh', 'next'], autoApply = true }
     },
     setRejection(value) { rejection = value; }, setNpc(fn) { runNpc = fn; },
     store() { return globalThis[Symbol.for('dsh-tavern/stores.v1')].get(path.resolve(dir)).store; },
-    async apply() { await plugin.apply(ctx, { dataDir: dir, npcTimeoutMs: 1000 }); },
+    async apply() { await plugin.apply(ctx, { dataDir: dir, npcTimeoutMs }); },
     async dispose() {
       if (closed) return; closed = true;
       // Cordis Fiber._unload awaits all effect disposers concurrently; it never emits 'dispose'.
@@ -146,6 +145,7 @@ async function setup(t, { directory, ids = ['fresh', 'next'], autoApply = true }
   return h;
 }
 
+
 test('isBlankAgent requires idle root and authoritative query events, never deprecated snapshotEvents', () => {
   const agent = { id: 'fresh', status: 'idle', session: { meta: {}, get snapshotEvents() { throw new Error('deprecated ABI'); } } };
   assert.equal(isBlankAgent(agent, []), true);
@@ -159,10 +159,10 @@ test('isBlankAgent requires idle root and authoritative query events, never depr
 
 test('boot registers exact routes, imports builtin, and exposes no global tools or private script fields', async (t) => {
   const h = await setup(t);
-  assert.deepEqual([...h.routes.keys()].sort(), ['archive', 'attach', 'delete-script', 'import', 'pause', 'start', 'state'].map((name) => '/tavern/api/' + name).sort());
+  assert.deepEqual([...h.routes.keys()].sort(), ['archive', 'attach', 'delete-script', 'import', 'pause', 'retry-recording', 'start', 'state'].map((name) => '/tavern/api/' + name).sort());
   const result = await h.request('state');
   assert.equal(result.status, 200); assert.equal(result.body.canStart, false);
-  assert.deepEqual(result.body.scripts.map((script) => script.key), ['curtain-castle@1.0.0']);
+  assert.deepEqual(result.body.scripts.map((script) => script.key), ['curtain-castle@2.1.1']);
   assert.equal(result.body.scripts[0].title, '这帮人脑子好像都有问题');
   assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_|npcGoals|reactions|privateHistory/);
   assert.equal(h.agent().definitions.size, 0);
@@ -172,13 +172,13 @@ test('boot registers exact routes, imports builtin, and exposes no global tools 
 
 test('automatically imported curtain-castle starts without importing the legacy fixture', async (t) => {
   const h = await setup(t);
-  const started = await h.request('start', { body: { sessionId: 'fresh', scriptKey: 'curtain-castle@1.0.0' } });
+  const started = await h.request('start', { body: { sessionId: 'fresh', scriptKey: 'curtain-castle@2.1.1' } });
   assert.equal(started.status, 200);
-  assert.equal(started.body.campaign.scriptKey, 'curtain-castle@1.0.0');
+  assert.equal(started.body.campaign.scriptKey, 'curtain-castle@2.1.1');
   assert.equal(h.modes.get('fresh'), 'dm');
   assert.equal(h.agent().followups.length, 1);
   const state = await h.request('state', { sessionId: 'fresh' });
-  assert.deepEqual(state.body.scripts.map((script) => script.key), ['curtain-castle@1.0.0']);
+  assert.deepEqual(state.body.scripts.map((script) => script.key), ['curtain-castle@2.1.1']);
   assert.doesNotMatch(JSON.stringify(state.body), /PRIVATE_|npcGoals|privateHistory|initialState/);
 });
 
@@ -212,17 +212,36 @@ test('start permanently binds, bootstraps DM and installs complete native scoped
   const h = await setup(t);
   const result = await h.start(); assert.equal(result.status, 200); assert.ok(result.body.opening);
   const agent = h.agent(); assert.equal(agent.followups.length, 1); assert.match(agent.followups[0].content[0].text, /开始冒险/);
-  assert.deepEqual([...agent.definitions.keys()], DM_TOOLS);
-  assert.deepEqual(agent.presentations, ['native']); assert.deepEqual(agent.restrictions, [{ allow: ['ask_user_question'] }]);
+  assert.equal(agent.followups[0].synthetic, true);
+  assert.deepEqual(agent.definitions.get('tavern_rest').parameters, { type: 'object', properties: {}, required: [], additionalProperties: false });
+  assert.deepEqual([...agent.definitions.keys()].sort(), [...DM_TOOLS].sort());
+  assert.deepEqual(agent.presentations, ['native']); assert.deepEqual(agent.restrictions, [{ allow: [] }]);
   assert.equal(agent.sections[0].complete, true); assert.equal(agent.sections[0].interpolate, false); assert.equal(agent.suppressed, true);
-  assert.match(agent.sections[0].text(), /PRIVATE_DM_SECRET/); assert.equal(h.modes.get('fresh'), 'dm');
-  for (const name of ['bash', 'read', 'subagent', 'run_code', 'persona_update_memory', 'new_scoped_escape_tool']) assert.equal(typeof agent.guards[0]({ name }), 'string');
-  for (const name of [...DM_TOOLS, 'ask_user_question']) assert.equal(agent.guards[0]({ name }), undefined);
+  assert.match(agent.sections[0].text(), /PRIVATE_DM_SECRET/, 'v1 retains its legacy private DM context'); assert.equal(h.modes.get('fresh'), 'dm');
+  for (const name of ['bash', 'read', 'subagent', 'run_code', 'persona_update_memory', 'new_scoped_escape_tool', 'ask_user_question']) assert.equal(typeof agent.guards[0]({ name }), 'string');
+  for (const name of DM_TOOLS) assert.equal(agent.guards[0]({ name }), undefined);
+  assert.match(agent.sections[0].text(), /玩家自由表达/);
+  assert.doesNotMatch(agent.sections[0].text(), /ask_user_question/);
+  assert.equal(h.agent('next').restrictions.length, 0);
   await assert.rejects(agent.execute('tavern_status', {}, h.agent('next')), { code: 'WRONG_CALLER' });
   const state = await h.request('state', { sessionId: 'fresh' });
   assert.equal(state.body.canStart, false); assert.equal(state.body.binding.campaignId, result.body.campaign.id);
   assert.equal((await h.start()).body.code, 'NEW_SESSION_REQUIRED');
   assert.doesNotMatch(JSON.stringify(state.body), /PRIVATE_|npcGoals|privateHistory|memoryLog|intimacy|initialState/);
+});
+
+test('bootstrap stays synthetic when host drops nonstandard message fields', async (t) => {
+  const h = await setup(t); const started = await h.start();
+  const agent = h.agent();
+  const { synthetic, ...hostMessage } = agent.followups[0];
+  await h.emit('agent/pre-step', { agent, messages: [hostMessage], signal: new AbortController().signal });
+  const campaign = await h.store().getCampaign(started.body.campaign.id);
+  assert.equal(campaign.state.turnIndex, 0);
+  assert.equal(campaign.state.log.find((entry) => entry.eventId === hostMessage.id)?.synthetic, true);
+  assert.equal(h.decisionCalls.length, 0);
+  await assert.rejects(agent.execute('tavern_combat'), { code: 'NO_PLAYER_INPUT' });
+  assert.equal(agent.definitions.has('tavern_speak'), false);
+  assert.equal(h.npcCalls.length, 0);
 });
 
 test('explicit takeover denies running old owner and busy store; atomically leaves old session readonly', async (t) => {
@@ -255,66 +274,6 @@ test('pause and resume preserve binding, reject paused steps, and block readonly
   assert.equal((await h.request('pause', { body: { sessionId: 'fresh', paused: false } })).status, 200);
   assert.deepEqual((await h.request('state', { sessionId: 'fresh' })).body.binding, binding);
   assert.deepEqual(await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('resumed-input')] }), { kind: 'accept' });
-});
-
-test('NPC publication is isolated before startup, uses caller delivery, submits only public structured report and disposes', async (t) => {
-  const h = await setup(t); await h.start();
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('ask-bran')] });
-  const result = await h.agent().execute('tavern_speak', { npcId: 'bran' });
-  assert.equal(result.speech, '我会自己判断。'); assert.equal(h.npcCalls.length, 1);
-  const call = h.npcCalls[0];
-  assert.equal(call.disposed, true); assert.equal(call.spec.request.parent, h.agent());
-  assert.deepEqual(call.spec.request.outputSchema.required, ['speech', 'action', 'feltIgnored', 'read', 'shift', 'next']);
-  assert.equal(call.spec.request.outputSchema.additionalProperties, false);
-  assert.match(call.child.sections[0].text(), /PRIVATE_BRAN/);
-  assert.doesNotMatch(call.child.sections[0].text(), /PRIVATE_DM_SECRET|PRIVATE_LYRA|PRIVATE_ELIN/);
-  assert.equal(h.modes.has(call.child.id), false);
-  assert.equal((await h.agent().execute('tavern_speak', { npcId: 'bran' })).speech, result.speech);
-  assert.equal(h.npcCalls.length, 1); // durable per-input idempotence.
-  const dormant = h.scopedAgent('tavern-npc-restored', { origin: 'subagent' });
-  await h.emit('agent/created', { agent: dormant });
-  assert.equal(typeof dormant.guards[0]({ name: 'structured_output' }), 'string');
-  assert.deepEqual(await h.emit('agent/pre-step', { agent: dormant, messages: [user('escape')] }), { kind: 'reject' });
-});
-
-test('cancelling a pending NPC call disposes exact activation and does not commit a ghost report', async (t) => {
-  const h = await setup(t); await h.start();
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('cancel-npc')] });
-  const published = deferred();
-  h.setNpc(async () => { published.resolve(); return new Promise(() => {}); });
-  const controller = new AbortController();
-  const operation = h.agent().execute('tavern_speak', { npcId: 'bran' }, h.agent(), controller.signal);
-  await published.promise;
-  controller.abort(new Error('cancel test'));
-  await assert.rejects(operation, { code: 'ABORTED' });
-  assert.equal(h.npcCalls.length, 1);
-  assert.equal(h.npcCalls[0].disposed, true);
-  assert.equal(h.modes.has(h.npcCalls[0].child.id), false);
-  const game = await h.store().getCampaign((await h.store().getBinding('fresh')).campaignId);
-  assert.equal(game.state.log.filter((entry) => entry.role === 'npc').length, 0);
-});
-
-test('effect unload aborts in-flight NPC before timeout, disposes activation, and releases final store ref', async (t) => {
-  const h = await setup(t); await h.start();
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('unload-npc')] });
-  const published = deferred(), release = deferred();
-  h.setNpc(async () => { published.resolve(); return release.promise; });
-  const operation = h.agent().execute('tavern_speak', { npcId: 'bran' }).catch((error) => error);
-  await published.promise;
-  const call = h.npcCalls[0];
-  const unloading = h.dispose();
-  await new Promise((resolve) => setImmediate(resolve));
-  const abortedDuringUnload = call.spec.signal.aborted;
-  // Always release the fake provider even on regression, so cleanup cannot hang the suite.
-  release.resolve({ speech: '', action: '取消后不再行动。' });
-  await operation; await unloading;
-  assert.equal(abortedDuringUnload, true, 'effect disposer must abort active NPC immediately, not wait for timeout');
-  assert.equal(call.disposed, true);
-  assert.equal(h.routes.size, 0);
-  assert.equal(globalThis[Symbol.for('dsh-tavern/stores.v1')].has(path.resolve(h.dir)), false);
-  const reopened = await setup(t, { directory: h.dir });
-  assert.equal((await reopened.request('state', { sessionId: 'fresh' })).body.binding.readOnly, false);
-  await reopened.dispose();
 });
 
 test('unload tracks an already-reading HTTP body, waits safely, and prevents its later mutation', async (t) => {
@@ -362,7 +321,7 @@ test('restored bindings regain DM isolation before any step and routes/effects d
   const h = await setup(t); const started = await h.start();
   await h.dispose(); assert.equal(h.routes.size, 0);
   const restored = await setup(t, { directory: h.dir });
-  assert.deepEqual([...restored.agent().definitions.keys()], DM_TOOLS);
+  assert.deepEqual([...restored.agent().definitions.keys()].sort(), [...DM_TOOLS].sort());
   assert.equal(restored.agent().sections[0].complete, true);
   assert.equal(restored.agent().suppressed, true);
   assert.equal(restored.modes.get('fresh'), 'dm');
@@ -372,152 +331,12 @@ test('restored bindings regain DM isolation before any step and routes/effects d
   await restored.dispose();
 });
 
-test('pre-step automatically decides once per actual input before continuation and never launches on restore', async (t) => {
-  const h = await setup(t); await h.start();
-  assert.equal(h.decisionCalls.length, 0);
-  const input = user('automatic-input');
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [input], signal: new AbortController().signal }, async () => {
-    assert.ok(h.decisionCalls.length > 0);
-    assert.ok(h.decisionCalls.every((call) => call.disposed));
-    return { kind: 'accept' };
-  });
-  const count = h.decisionCalls.length;
-  for (const call of h.decisionCalls) {
-    assert.ok(call.spec.request.outputSchema.properties.kind);
-    assert.doesNotMatch(call.spec.request.prompt[0].text, /公开台词 speech/);
-    assert.match(call.spec.request.prompt[0].text, /独立决定/);
-  }
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [input] });
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [] });
-  assert.equal(h.decisionCalls.length, count);
-  await h.dispose();
-  const restored = await setup(t, { directory: h.dir });
-  assert.equal(restored.decisionCalls.length, 0);
-});
-
-test('one pre-step batch independently reacts to each actual player message in order', async (t) => {
-  const h = await setup(t); await h.start();
-  const batch = [user('batch-first', '我先向队友道歉。'), user('batch-second', '随后请大家检查矿道。')];
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: batch });
-  const triggers = h.decisionCalls.map((call) => JSON.parse(call.child.sections[0].text().split('【当前机会】')[1].split('\n')[0]).id);
-  assert.deepEqual([...new Set(triggers)], ['batch-first', 'batch-second']);
-  assert.equal(triggers.filter((id) => id === 'batch-first').length, triggers.filter((id) => id === 'batch-second').length);
-  assert.ok(triggers.filter((id) => id === 'batch-first').length > 0);
-  const count = h.decisionCalls.length;
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: batch });
-  assert.equal(h.decisionCalls.length, count);
-  const game = await h.store().getCampaign((await h.store().getBinding('fresh')).campaignId);
-  assert.equal(game.state.log.filter((entry) => entry.role === 'player').length, 2);
-});
-
-test('canonical clickable selected and custom answers become real idempotent inputs without synthetic followups', async (t) => {
-  const h = await setup(t); await h.start();
-  const followups = h.agent().followups.length;
-  const value = { answers: [{ id: 'action', selected: ['保护队友'], custom: '我挡在布兰面前' }] };
-  await h.answer({ value });
-  assert.ok(h.decisionCalls.length > 0);
-  const count = h.decisionCalls.length;
-  const game = await h.store().getCampaign((await h.store().getBinding('fresh')).campaignId);
-  const input = game.state.log.find((entry) => entry.eventId === 'tavern-choice:choice-1');
-  assert.equal(input.role, 'player');
-  assert.match(input.text, /你准备怎么做？/); assert.match(input.text, /保护队友/); assert.match(input.text, /我挡在布兰面前/);
-  assert.equal(h.agent().followups.length, followups);
-  await h.answer({ value }); assert.equal(h.decisionCalls.length, count);
-  await h.answer({ callId: 'custom-only', value: { answers: [{ id: 'action', selected: [], custom: '先检查伤势' }] } });
-  assert.ok(h.decisionCalls.length > count);
-});
-
-test('failed pending skipped malformed ordinary and readonly clickable outcomes never create input or decisions', async (t) => {
-  const h = await setup(t); const started = await h.start();
-  for (const value of [{ pending: true, callId: 'pending' }, { answers: [] }, { answers: [{ id: 'action', selected: [], custom: '  ' }] }, { answers: [{ id: 'missing', selected: ['攻击'] }] }, { answers: [{ id: 'action', selected: '攻击' }] }]) await h.answer({ value });
-  await h.answer({ result: { isError: true, error: { message: 'cancelled' }, content: [] } });
-  await h.answer({ agent: h.agent('next') });
-  assert.equal(h.decisionCalls.length, 0);
-  await h.request('pause', { body: { sessionId: 'fresh', paused: true } });
-  await h.answer(); assert.equal(h.decisionCalls.length, 0);
-  await h.request('pause', { body: { sessionId: 'fresh', paused: false } });
-  await h.request('attach', { body: { sessionId: 'next', campaignId: started.body.campaign.id, takeover: true } });
-  await h.answer(); assert.equal(h.decisionCalls.length, 0);
-  await h.store().withCampaign('next', async (campaign) => { campaign.state.completed = true; campaign.state.status = 'completed'; });
-  await h.answer({ agent: h.agent('next') });
-  await h.emit('agent/pre-step', { agent: h.agent('next'), messages: [user('completed-input')] });
-  assert.equal(h.decisionCalls.length, 0);
-});
-
-test('pre-step forwards actual payload cancellation and unload drains autonomous hook work', async (t) => {
-  const h = await setup(t); await h.start();
-  const published = deferred();
-  h.setNpc(async () => { published.resolve(); return new Promise(() => {}); });
-  const controller = new AbortController();
-  const operation = h.emit('agent/pre-step', { agent: h.agent(), messages: [user('cancel-automatic')], signal: controller.signal }).catch((error) => error);
-  await published.promise;
-  controller.abort(new Error('host cancellation'));
-  const error = await operation;
-  assert.equal(error.code, 'ABORTED');
-  assert.ok(h.decisionCalls.every((call) => call.spec.signal.aborted && call.disposed));
-  const secondPublished = deferred();
-  h.setNpc(async () => { secondPublished.resolve(); return new Promise(() => {}); });
-  const second = h.answer({ callId: 'unload-choice' }).catch((error) => error);
-  await secondPublished.promise;
-  await h.dispose(); await second;
-  assert.ok(h.decisionCalls.every((call) => call.spec.signal.aborted && call.disposed));
-  assert.equal(globalThis[Symbol.for('dsh-tavern/stores.v1')].has(path.resolve(h.dir)), false);
-});
-
-test('DM narration captures source-scene audience per committed message before later NPC decisions', async (t) => {
-  const h = await setup(t); await h.start();
-  await h.store().withCampaign('fresh', async (campaign) => {
-    campaign.state.npcMeta ??= {};
-    campaign.state.npcMeta.lyra = { status: 'left' };
-    campaign.state.npcMeta.elin = { status: 'left' };
-  });
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('before-move')] });
-  const stream = (frame) => h.emit('agent/assistant-stream', { agent: h.agent(), frame });
-  const assistant = (seq, text, type = 'assistant/message') => ({ seq, type, data: { message: { content: [{ type: 'text', text }] } } });
-  h.events.set('fresh', [{ seq: 1, type: 'turn/start' }]);
-  await stream({ type: 'start', attemptId: 'before-arrival', turn: 1, step: 1 });
-  h.events.get('fresh').push(assistant(2, 'PREARRIVAL_NARRATION：布兰低声说出营地的暗号。'));
-  await stream({ type: 'end', attemptId: 'before-arrival', outcome: { kind: 'committed', eventType: 'assistant/message', seq: 2 } });
-  await h.store().withCampaign('fresh', async (campaign) => {
-    campaign.state.npcMeta.bran = { status: 'left' };
-    campaign.state.npcMeta.lyra = { status: 'active', returnedAtScene: 'fork' };
-  });
-  await h.agent().execute('tavern_scene', { sceneId: 'fork' });
-  const before = h.decisionCalls.length;
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('after-move', '我看向莱拉。')] });
-  assert.ok(h.decisionCalls.length > before);
-  for (const call of h.decisionCalls.slice(before)) assert.doesNotMatch(call.child.sections[0].text(), /PREARRIVAL_NARRATION/);
-  let game = await h.store().getCampaign((await h.store().getBinding('fresh')).campaignId);
-  const first = game.state.log.find((entry) => entry.eventId === 'fresh:message:2');
-  assert.equal(first.sceneId, 'camp'); assert.deepEqual(first.audience, ['bran']);
-  await stream({ type: 'start', attemptId: 'after-arrival', turn: 1, step: 2 });
-  h.events.get('fresh').push(assistant(3, 'POSTARRIVAL_NARRATION：莱拉指出岔道的风声。'));
-  await stream({ type: 'end', attemptId: 'after-arrival', outcome: { kind: 'committed', eventType: 'assistant/message', seq: 3 } });
-  await stream({ type: 'start', attemptId: 'failed-attempt', turn: 1, step: 3 });
-  h.events.get('fresh').push(assistant(4, 'FAILED_ATTEMPT_MUST_NOT_BE_HEARD', 'assistant/attempt'));
-  await stream({ type: 'end', attemptId: 'failed-attempt', outcome: { kind: 'committed', eventType: 'assistant/attempt', seq: 4 } });
-  h.events.get('fresh').push(assistant(5, 'LEGACY_UNSCOPED_NARRATION'));
-  await h.emit('agent/turn-stopping', { agent: h.agent(), turn: 1 });
-  await h.emit('agent/turn-stopping', { agent: h.agent(), turn: 1 });
-  game = await h.store().getCampaign((await h.store().getBinding('fresh')).campaignId);
-  assert.equal(game.state.log.filter((entry) => entry.eventId === 'fresh:message:2').length, 1);
-  assert.deepEqual(game.state.log.find((entry) => entry.eventId === 'fresh:message:3').audience, ['lyra']);
-  assert.equal(game.state.log.find((entry) => entry.eventId === 'fresh:message:3').sceneId, 'fork');
-  assert.deepEqual(game.state.log.find((entry) => entry.eventId === 'fresh:message:5').audience, []);
-  assert.ok(!game.state.log.some((entry) => entry.text.includes('FAILED_ATTEMPT_MUST_NOT_BE_HEARD')));
-  const after = h.decisionCalls.length;
-  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('after-narration', '接下来呢？')] });
-  const prompts = h.decisionCalls.slice(after).map((call) => call.child.sections[0].text()).join('\n');
-  assert.match(prompts, /POSTARRIVAL_NARRATION/);
-  assert.doesNotMatch(prompts, /PREARRIVAL_NARRATION|LEGACY_UNSCOPED_NARRATION/);
-});
-
 test('ZIP route accepts actual demo archive and archive/delete APIs enforce referenced-save safety', async (t) => {
   const h = await setup(t);
   const zip = await readFile(new URL('../demo/curtain-castle.zip', import.meta.url));
   const imported = await h.request('import', { body: { name: 'curtain-castle.zip', base64: zip.toString('base64') } });
   assert.equal(imported.status, 200);
-  assert.equal(imported.body.script.scriptKey, 'curtain-castle@1.0.0');
+  assert.match(imported.body.script.scriptKey, /^curtain-castle@\d+\.\d+\.\d+$/); // Archive may intentionally retain an older published version.
   await h.start();
   assert.equal((await h.request('archive', { body: { scriptKey: KEY, archived: true } })).status, 200);
   const blocked = await h.start('next'); assert.notEqual(blocked.status, 200);
@@ -525,4 +344,250 @@ test('ZIP route accepts actual demo archive and archive/delete APIs enforce refe
   const state = await h.request('state', { sessionId: 'fresh' });
   assert.equal(state.body.scripts.find((script) => script.key === KEY).archived, true); assert.equal(state.body.binding.readOnly, false);
   assert.doesNotMatch(JSON.stringify(state.body), /PRIVATE_/);
+});
+
+
+const report = (extra = {}) => ({ summary: '本轮事实', sceneId: '', location: '', items: [], npcs: [], events: [], ...extra });
+async function until(predicate, label = 'background recording') {
+  for (let i = 0; i < 1000; i++) { if (await predicate()) return; await new Promise((resolve) => setTimeout(resolve, 2)); }
+  assert.fail(`Timed out waiting for ${label}`);
+}
+async function commit(h, text = '公爵把钱袋交给玩家，玩家离开了。', seq = 2) {
+  const stream = (frame) => h.emit('agent/assistant-stream', { agent: h.agent(), frame });
+  await stream({ type: 'start', attemptId: `attempt-${seq}`, turn: 1, step: 1 });
+  h.events.set('fresh', [{ seq: 1, type: 'turn/start' }, { seq, type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } }]);
+  await stream({ type: 'end', attemptId: `attempt-${seq}`, outcome: { kind: 'committed', eventType: 'assistant/message', seq } });
+  await h.emit('agent/turn-stopping', { agent: h.agent(), turn: 1 });
+}
+const campaign = async (h) => h.store().getCampaign((await h.store().getBinding('fresh')).campaignId);
+
+test('pre-step records actual inputs but never starts per-NPC approval, including batches and overlap', async (t) => {
+  const h = await setup(t); await h.start();
+  h.setNpc(async () => assert.fail('pre-step must not run models'));
+  const first = user('first', '拿钱走人'), second = user('second', '等一会儿');
+  await Promise.all([h.emit('agent/pre-step', { agent: h.agent(), messages: [first] }), h.emit('agent/pre-step', { agent: h.agent(), messages: [first, second] })]);
+  await h.emit('agent/pre-step', { agent: h.agent(), messages: [first, second] });
+  assert.deepEqual((await campaign(h)).state.log.filter((entry) => entry.role === 'player').map((entry) => entry.eventId), ['first', 'second']);
+  assert.equal(h.children.length, 0); assert.equal(h.decisionCalls.length, 0);
+  await h.dispose(); const restored = await setup(t, { directory: h.dir }); assert.equal(restored.children.length, 0); await restored.dispose();
+});
+
+test('turn progress is session scoped and contains no player, provider or prose details', async (t) => {
+  const h = await setup(t); await h.start();
+  const state = async (sessionId = 'fresh') => (await h.request('state', { sessionId })).body.turnProgress;
+  const controller = new AbortController();
+  await h.emit('agent/inbox/inserted', { agent: h.agent(), message: user('private-id', 'PRIVATE_PLAYER') });
+  assert.equal((await state()).phase, 'starting');
+  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('private-id', 'PRIVATE_PLAYER')], signal: controller.signal });
+  assert.equal(h.children.length, 0); assert.equal((await state()).phase, 'waiting_dm'); assert.equal(await state('next'), null);
+  await h.emit('agent/request-error', { agent: h.agent(), failure: { code: 'TRANSPORT', message: 'PRIVATE_PROVIDER' } });
+  await h.emit('agent/assistant-stream', { agent: h.agent(), frame: { type: 'chunk', attemptId: 'attempt', chunk: { type: 'text-delta', text: 'PRIVATE_DM' } } });
+  assert.equal((await state()).phase, 'output');
+  controller.abort(); assert.equal((await state()).phase, 'cancelled');
+  assert.doesNotMatch(JSON.stringify(await state()), /PRIVATE_|private-id/);
+});
+
+test('one sealed recorder starts only after prose persistence and cannot block the foreground turn', async (t) => {
+  const h = await setup(t); await h.start(); const entered = deferred(), release = deferred();
+  h.setNpc(async () => { const game = await campaign(h); assert.equal(game.state.log.at(-1).text, '已付款正文'); assert.equal(game.state.storyTasks['fresh:message:2'].status, 'pending'); entered.resolve(); return release.promise; });
+  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('take-money')] }); assert.equal(h.children.length, 0);
+  await commit(h, '已付款正文'); await entered.promise; // turn-stopping returned before recorder completed.
+  assert.equal(h.npcCalls.length, 1); const call = h.npcCalls[0];
+  assert.equal(call.spec.request.parent, h.agent()); assert.ok(call.spec.request.outputSchema.properties.items); assert.equal(call.spec.request.outputSchema.properties.kind, undefined);
+  assert.match(call.prompt, /已付款正文/); assert.doesNotMatch(call.prompt, /PRIVATE_DM_SECRET|PRIVATE_BRAN|PRIVATE_LYRA|PRIVATE_ELIN/);
+  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('continue', '继续走')] }); assert.equal(h.npcCalls.length, 1);
+  release.resolve(report()); await until(async () => (await campaign(h)).state.storyTasks['fresh:message:2'].status === 'recorded');
+  assert.equal(call.disposed, true); assert.equal(h.modes.has(call.child.id), false);
+  await h.emit('agent/turn-stopping', { agent: h.agent(), turn: 1 });
+  await new Promise((resolve) => setImmediate(resolve)); assert.equal(h.npcCalls.length, 1);
+  const dormant = h.scopedAgent('tavern-npc-restored', { origin: 'subagent' }); await h.emit('agent/created', { agent: dormant });
+  assert.equal(typeof dormant.guards[0]({ name: 'structured_output' }), 'string');
+  assert.deepEqual(await h.emit('agent/pre-step', { agent: dormant, messages: [user('escape')] }), { kind: 'reject' });
+});
+
+test('failed extraction keeps prose across unload/reload and explicit retry route is idempotent', async (t) => {
+  const h = await setup(t); const started = await h.start();
+  h.setNpc(async () => { throw Error('PRIVATE_PROVIDER'); }); await commit(h, '公爵确已交付钱袋。');
+  await until(async () => (await campaign(h)).state.storyTasks['fresh:message:2'].status === 'failed');
+  let state = (await h.request('state', { sessionId: 'fresh' })).body;
+  assert.equal(state.campaign.storyRecording.failed, 1); assert.match(JSON.stringify(state.campaign.history), /公爵确已交付钱袋/); assert.doesNotMatch(JSON.stringify(state), /PRIVATE_PROVIDER/);
+  await h.dispose(); const restored = await setup(t, { directory: h.dir }); assert.equal(restored.children.length, 0);
+  restored.setNpc(async () => report({ items: [{ id: 'purse', name: '钱袋', quantity: 1, description: '定金', removed: false }] }));
+  const response = await restored.request('retry-recording', { body: { sessionId: 'fresh' } }); assert.equal(response.status, 200); assert.deepEqual(response.body, { ok: true, queued: true });
+  await until(async () => (await campaign(restored)).state.storyTasks['fresh:message:2'].status === 'recorded');
+  await restored.request('retry-recording', { body: { sessionId: 'fresh' } });
+  await new Promise((resolve) => setImmediate(resolve));
+  const game = await campaign(restored); assert.equal(restored.npcCalls.length, 1); assert.equal(game.state.freeActionItems.length, 1); assert.equal(game.state.log.filter((entry) => entry.role === 'dm').length, 1);
+  await restored.request('attach', { body: { sessionId: 'next', campaignId: started.body.campaign.id, takeover: true } });
+  assert.notEqual((await restored.request('retry-recording', { body: { sessionId: 'fresh' } })).status, 200); await restored.dispose();
+});
+
+test('effect unload aborts pending recording and disposes exact activation without ghost state', async (t) => {
+  const h = await setup(t); await h.start(); const entered = deferred(), release = deferred();
+  h.setNpc(async () => { entered.resolve(); return release.promise; }); await commit(h); await entered.promise;
+  const call = h.npcCalls[0]; const unloading = h.dispose();
+  await new Promise((resolve) => setImmediate(resolve)); const wasAborted = call.spec.signal.aborted;
+  release.resolve(report({ items: [{ id: 'ghost', name: '幽灵物品', quantity: 1, description: '', removed: false }] })); await unloading;
+  assert.equal(wasAborted, true); assert.equal(call.disposed, true); assert.equal(h.routes.size, 0);
+  assert.equal(globalThis[Symbol.for('dsh-tavern/stores.v1')].has(path.resolve(h.dir)), false);
+  const reopened = await setup(t, { directory: h.dir }); assert.deepEqual((await campaign(reopened)).state.freeActionItems ?? [], []);
+  assert.ok((await campaign(reopened)).state.log.some((entry) => entry.role === 'dm')); await reopened.dispose();
+});
+
+test('hung recording startup times out and late activation is disposed while unload retains isolation', async (t) => {
+  const h = await setup(t, { npcTimeoutMs: 30 }); await h.start(); const gate = deferred(), entered = deferred(); const original = h.ctx.subagents.startActivation;
+  h.ctx.subagents.startActivation = async (spec) => { const activation = await original(spec); entered.resolve(); await gate.promise; return activation; };
+  await commit(h); await entered.promise; const call = h.npcCalls[0];
+  await until(() => call.spec.signal.aborted);
+  assert.equal(typeof call.child.guards[0]({ name: 'structured_output' }), 'string');
+  let unloaded = false; const unloading = h.dispose().then(() => { unloaded = true; }); await new Promise((resolve) => setImmediate(resolve)); assert.equal(unloaded, false);
+  gate.resolve(); await unloading; assert.equal(call.disposed, true); assert.equal(h.modes.has(call.child.id), false);
+});
+
+test('hung recording dispose stays bounded and isolated without stopping unrelated agents', async (t) => {
+  const h = await setup(t, { npcTimeoutMs: 30 }); await h.start(); const gate = deferred(); const original = h.ctx.subagents.startActivation;
+  h.ctx.subagents.startActivation = async (spec) => { const activation = await original(spec), dispose = activation.dispose; activation.dispose = async () => { await gate.promise; await dispose(); }; return activation; };
+  await commit(h); await until(() => h.npcCalls.length === 1 && h.npcCalls[0].spec.signal.aborted); const call = h.npcCalls[0];
+  assert.equal(typeof call.child.guards[0]({ name: 'structured_output' }), 'string'); assert.equal(h.agent('next').status, 'idle');
+  let unloaded = false; const unloading = h.dispose().then(() => { unloaded = true; }); await new Promise((resolve) => setImmediate(resolve)); assert.equal(unloaded, false);
+  gate.resolve(); await unloading; assert.equal(call.disposed, true); assert.equal(h.modes.has(call.child.id), false);
+});
+
+
+// Scripted narrator/report fixtures test the host-to-save chain, not provider language quality.
+test('demo narrative end-to-end accepts ordinary language without old approval tools', async (t) => {
+  const scenarios = [
+    { name: '拿钱走人', input: '拿钱走人', prose: '公爵依约把钱袋递到你手里。你收好钱袋，走到城堡外门。', sceneId: 'gate', money: true },
+    { name: '同义表达', input: '收下定金，然后动身去城堡', prose: '公爵把约定的酬金装入钱袋交给你。你收妥后动身，来到城堡外门。', sceneId: 'gate', money: true },
+    { name: '拒付且前提未满足', input: '先付定金，不付我就不走', prose: '公爵摇头说：“没有签字就不给定金。”钱袋仍在桌上，你没有出发。', sceneId: '', money: false },
+    { name: '等待不是拾取', input: '我等公爵把话说完', prose: '你留在书房等候。公爵补充了要求，桌上的钱袋没有移动。', sceneId: '', money: false },
+    { name: '拒绝并离开', input: '这活我不接，我走了', prose: '你拒绝委托，没有拿钱，转身走出书房来到归途。', sceneId: 'withdrawal', money: false }
+  ];
+  for (const scenario of scenarios) await t.test(scenario.name, async (t) => {
+    const h = await setup(t);
+    const started = await h.request('start', { body: { sessionId: 'fresh', scriptKey: 'curtain-castle@2.1.1' } }); assert.equal(started.status, 200);
+    await h.store().withCampaign('fresh', (game) => { game.state.freeActionItems = [{ id: 'old-key', name: '旧钥匙', quantity: 1 }]; });
+    let inputCount = 0;
+    h.setNpc(async (spec) => {
+      inputCount++; assert.ok(spec.request.outputSchema.properties.items);
+      return report({ sceneId: scenario.sceneId, location: scenario.sceneId === 'gate' ? '城堡外门' : scenario.sceneId === 'withdrawal' ? '归途' : '公爵书房',
+        items: scenario.money ? [{ id: 'deposit', name: '钱袋', quantity: 1, description: '公爵已付款', removed: false }] : [],
+        npcs: [
+          { npcId: 'bran', speech: '', observations: ['布兰亲眼见到本轮的实际结果'] },
+          { npcId: 'duke', speech: '', observations: ['公爵记得玩家本轮的选择'] }
+        ] });
+    });
+    await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('choice', scenario.input)] });
+    assert.equal(inputCount, 0); assert.equal(h.children.length, 0);
+    await commit(h, scenario.prose);
+    await until(async () => (await campaign(h)).state.storyTasks?.['fresh:message:2']?.status === 'recorded');
+    const game = await campaign(h), state = (await h.request('state', { sessionId: 'fresh' })).body;
+    assert.equal(inputCount, 1); assert.equal(game.state.sceneId, scenario.sceneId || 'commission');
+    assert.ok(state.campaign.inventory.some((item) => item.id === 'old-key'));
+    assert.equal(state.campaign.inventory.some((item) => item.id === 'deposit'), scenario.money);
+    assert.equal(state.campaign.history.find((entry) => entry.role === 'dm').text, scenario.prose);
+    assert.equal(state.campaign.storyRecording.pending, 0); assert.equal(state.campaign.storyRecording.failed, 0);
+    for (const npcId of ['bran', 'duke']) assert.equal(game.state.npcs[npcId].processedEventIds.length, 1);
+    await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('next-choice', '继续')] });
+    const prompt = h.agent().sections[0].text();
+    assert.match(prompt, /布兰亲眼见到本轮的实际结果/); assert.match(prompt, /公爵记得玩家本轮的选择/);
+    assert.equal(h.npcCalls.length, 1); assert.deepEqual([...h.agent().definitions.keys()].sort(), [...DM_TOOLS].sort());
+  });
+});
+
+
+const assistantEvent = (seq, text) => ({ seq, type: 'assistant/message', data: { message: { content: [{ type: 'text', text }] } } });
+function failNextNarrationWrite(h) {
+  const store = h.store(), original = store.withCampaign;
+  let failures = 0;
+  store.withCampaign = async function (...args) {
+    if (!failures++) throw Error('TEST_TRANSIENT_DISK_FAILURE');
+    return original.apply(this, args);
+  };
+  return { restore() { store.withCampaign = original; }, failures: () => failures };
+}
+
+test('a transient narration write failure survives a later turn and records once without replay', async (t) => {
+  const h = await setup(t); await h.start();
+  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('first-turn', '拿钱走人')] });
+  const failure = failNextNarrationWrite(h);
+  await commit(h, 'FIRST_TURN_PROSE：公爵已经把钱袋交给你。');
+  failure.restore(); assert.equal(failure.failures(), 1);
+  assert.ok(!(await campaign(h)).state.log.some(entry => entry.role === 'dm'));
+  assert.equal(h.npcCalls.length, 0);
+  assert.match((await h.request('state', { sessionId: 'fresh' })).body.campaign.storyRecording.saveError, /不能确认已保存/);
+  h.events.get('fresh').push({ seq: 3, type: 'turn/start' });
+  await h.emit('agent/pre-step', { agent: h.agent(), messages: [user('second-turn', '接着走')] });
+  h.setNpc(async () => report({ items: [{ id: 'purse', name: '钱袋', quantity: 1, description: '第一回合已付款', removed: false }] }));
+  await h.emit('agent/turn-stopping', { agent: h.agent(), turn: 2 });
+  await until(async () => (await campaign(h)).state.storyTasks?.['fresh:message:2']?.status === 'recorded');
+  const saved = await campaign(h), prose = saved.state.log.find(entry => entry.eventId === 'fresh:message:2');
+  assert.equal(prose.text, 'FIRST_TURN_PROSE：公爵已经把钱袋交给你。');
+  assert.deepEqual(prose.audience, ['bran', 'lyra', 'elin']); assert.equal(prose.inputId, 'first-turn');
+  assert.equal(saved.state.storyTasks['fresh:message:2'].attempts, 1);
+  assert.equal(saved.state.freeActionItems.length, 1); assert.equal(h.npcCalls.length, 1);
+  await h.request('retry-recording', { body: { sessionId: 'fresh' } });
+  await h.emit('agent/turn-stopping', { agent: h.agent(), turn: 2 });
+  assert.equal((await campaign(h)).state.log.filter(entry => entry.eventId === prose.eventId).length, 1);
+  assert.equal(h.npcCalls.length, 1); assert.equal((await campaign(h)).state.freeActionItems.length, 1);
+});
+
+test('boot recovers post-boundary prose after lost scope without giving later NPCs old memories or latest input', async (t) => {
+  const h = await setup(t); await h.start();
+  const failure = failNextNarrationWrite(h);
+  await commit(h, 'LOST_SCOPE_PROSE：旧地点的一次付款已经完成。'); failure.restore();
+  assert.equal(failure.failures(), 1); assert.equal(h.npcCalls.length, 0);
+  await h.store().withCampaign('fresh', game => {
+    game.state.sceneId = 'fork';
+    game.state.npcMeta = { bran: { status: 'left' }, lyra: { status: 'active' }, elin: { status: 'active' } };
+    game.state.log.push({ role: 'player', eventId: 'latest-input', inputId: 'latest-input', text: 'LATER_PLAYER_SECRET', sceneId: 'fork', audience: ['lyra', 'elin'], turn: 1 });
+  });
+  const before = (await campaign(h)).state.npcs;
+  const events = structuredClone(h.events.get('fresh'));
+  events.push({ seq: 3, type: 'turn/start' }, { seq: 4, type: 'user/message', data: { message: user('latest-input', 'LATER_PLAYER_SECRET') } });
+  await h.dispose();
+  const restored = await setup(t, { directory: h.dir, autoApply: false });
+  restored.events.set('fresh', events);
+  restored.setNpc(async () => { throw Error('temporary recorder outage after archive recovery'); });
+  await restored.apply();
+  await until(async () => (await campaign(restored)).state.storyTasks?.['fresh:message:2']?.status === 'failed');
+  let saved = await campaign(restored), prose = saved.state.log.find(entry => entry.eventId === 'fresh:message:2');
+  assert.equal(prose.recovered, true); assert.deepEqual(prose.audience, []); assert.equal(prose.inputId, undefined);
+  assert.equal(prose.text, 'LOST_SCOPE_PROSE：旧地点的一次付款已经完成。');
+  assert.match(restored.npcCalls[0].prompt, /"perceptionUnavailable":true/);
+  assert.match(restored.npcCalls[0].prompt, /"playerInput":null/);
+  restored.setNpc(async () => report({ items: [{ id: 'old-payment', name: '钱袋', quantity: 1, description: '旧正文的付款', removed: false }] }));
+  await restored.request('retry-recording', { body: { sessionId: 'fresh' } });
+  await until(async () => (await campaign(restored)).state.storyTasks['fresh:message:2'].status === 'recorded');
+  saved = await campaign(restored);
+  assert.deepEqual(saved.state.npcs, before); assert.deepEqual(saved.state.storyReports['fresh:message:2'].npcEvents, []);
+  assert.equal(saved.state.freeActionItems.length, 1); assert.equal(saved.state.storyTasks['fresh:message:2'].attempts, 2);
+  await restored.request('retry-recording', { body: { sessionId: 'fresh' } });
+  await restored.emit('agent/turn-stopping', { agent: restored.agent(), turn: 2 });
+  assert.equal(restored.npcCalls.length, 2); assert.equal((await campaign(restored)).state.log.filter(entry => entry.eventId === prose.eventId).length, 1);
+  await restored.dispose();
+});
+
+test('first upgrade establishes a persisted recovery floor and never replays old pre-boundary prose', async (t) => {
+  const h = await setup(t); await h.start();
+  await h.store().withCampaign('fresh', game => {
+    delete game.state.narrationRecoveryFloor;
+    game.state.freeActionItems = [{ id: 'existing', name: '旧存档物品', quantity: 3 }];
+  });
+  const before = (await campaign(h)).state.npcs; await h.dispose();
+  const restored = await setup(t, { directory: h.dir, autoApply: false });
+  restored.events.set('fresh', [{ seq: 39, type: 'turn/start' }, assistantEvent(40, 'PRE_UPGRADE_PROSE：这段早已处理过的旧付款不能重放。')]);
+  await restored.apply();
+  let saved = await campaign(restored);
+  assert.equal(saved.state.narrationRecoveryFloor, 40); assert.equal(restored.npcCalls.length, 0);
+  assert.ok(!saved.state.log.some(entry => entry.text.includes('PRE_UPGRADE_PROSE')));
+  assert.deepEqual(saved.state.freeActionItems, [{ id: 'existing', name: '旧存档物品', quantity: 3 }]);
+  restored.events.get('fresh').push({ seq: 41, type: 'turn/start' }, assistantEvent(42, 'POST_UPGRADE_PROSE：你在当前地点等了一会儿。'));
+  await restored.emit('agent/turn-stopping', { agent: restored.agent(), turn: 2 });
+  await until(async () => (await campaign(restored)).state.storyTasks?.['fresh:message:42']?.status === 'recorded');
+  saved = await campaign(restored);
+  assert.equal(restored.npcCalls.length, 1); assert.ok(!saved.state.storyTasks['fresh:message:40']);
+  assert.equal(saved.state.log.find(entry => entry.eventId === 'fresh:message:42').recovered, true);
+  assert.deepEqual(saved.state.npcs, before); assert.deepEqual(saved.state.freeActionItems, [{ id: 'existing', name: '旧存档物品', quantity: 3 }]);
+  await restored.dispose();
 });

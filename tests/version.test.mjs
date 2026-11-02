@@ -19,10 +19,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 function service(overrides = {}) {
   return {
     apiVersion: 1,
-    version: '0.4.1',
+    version: '0.4.3',
     createExternalState() {},
     renderExternalCard() {},
     processExternalEvent() {},
+    developExternalState() {},
     setExternalSessionMode() {},
     ...overrides
   };
@@ -73,7 +74,7 @@ test('caret, tilde, minimum, exact, and wildcard ranges behave as documented', (
 });
 
 test('the guard accepts a compatible service and reports the mounted version', () => {
-  assert.equal(serviceCultivationVersion(service()), '0.4.1');
+  assert.equal(serviceCultivationVersion(service()), '0.4.3');
   assert.equal(cultivationProblem(service(), undefined), null);
   assert.equal(cultivationProblem(service({ version: undefined }), '0.4.3'), null);
   assert.equal(cultivationProblem(service({ version: undefined }), undefined), null, 'an unknown version cannot be judged');
@@ -89,6 +90,9 @@ test('the guard refuses a missing, incompatible, or incomplete service with an a
 
   const incomplete = cultivationProblem(service({ processExternalEvent: undefined }), undefined);
   assert.match(incomplete, /processExternalEvent/);
+
+  assert.match(cultivationProblem(service({ version: '0.4.2' }), undefined), /当前检测到 0\.4\.2/);
+  assert.match(cultivationProblem(service({ developExternalState: undefined }), undefined), /缺少 developExternalState/);
 
   const tooOld = cultivationProblem(service({ version: '0.3.0' }), undefined);
   assert.match(tooOld, /当前检测到 0\.3\.0/);
